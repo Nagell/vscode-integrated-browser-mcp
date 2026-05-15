@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
+*.code-workspace
 .gitignore
 vsc-extension-quickstart.md
 **/tsconfig.json
