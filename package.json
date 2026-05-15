@@ -1,0 +1,66 @@
+{
+  "name": "vscode-integrated-browser-mcp",
+  "displayName": "Integrated Browser MCP",
+  "description": "Exposes VS Code's Integrated Browser as an MCP server so external agents (Claude Code, etc.) can control it",
+  "version": "0.0.1",
+  "publisher": "CHANGEME",
+  "engines": {
+    "vscode": "^1.112.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["mcp", "browser", "ai", "agent", "claude"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "integratedBrowserMcp.startServer",
+        "title": "Integrated Browser MCP: Start Server"
+      },
+      {
+        "command": "integratedBrowserMcp.stopServer",
+        "title": "Integrated Browser MCP: Stop Server"
+      },
+      {
+        "command": "integratedBrowserMcp.listTools",
+        "title": "Integrated Browser MCP: List Available LM Tools (debug)"
+      }
+    ],
+    "configuration": {
+      "title": "Integrated Browser MCP",
+      "properties": {
+        "integratedBrowserMcp.port": {
+          "type": "number",
+          "default": 3100,
+          "description": "Port the MCP server listens on"
+        },
+        "integratedBrowserMcp.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the MCP server automatically when VS Code opens"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "test": "vscode-test",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.112.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.56.1",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0"
+  }
+}
