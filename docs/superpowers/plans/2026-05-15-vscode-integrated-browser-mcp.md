@@ -4,7 +4,9 @@
 
 **Goal:** Build a VS Code extension that exposes VS Code's built-in Integrated Browser as an MCP server, so external agents like Claude Code can navigate, read, screenshot, and interact with web pages inside VS Code.
 
-**Architecture:** A VS Code extension activates on startup, starts an HTTP MCP server on a configurable local port, and bridges MCP tool calls to VS Code's internal browser APIs. The primary path uses `vscode.lm.invokeTool()` to call VS Code's own built-in browser agent tools; if those are locked to Copilot-only context, a fallback uses `simpleBrowser.api.open` + direct CDP attachment via Playwright.
+> **Revision 2026-05-15 (post architectural review):** Several implementation errors from the first draft have been corrected. See [docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md](../../plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md) §"Context & Research" for full details. Affected sections: Task 2 (stateful transport, body parsing, `GET /health` route, Claude Code config file + URL path), Task 3B (removed incorrect `simpleBrowser.api.open` call from CDP path).
+
+**Architecture:** A VS Code extension activates on startup, starts an HTTP MCP server on a configurable local port, and bridges MCP tool calls to VS Code's internal browser APIs. The primary path uses `vscode.lm.invokeTool()` to call VS Code's own built-in browser agent tools; if those are locked to Copilot-only context, a fallback uses direct CDP attachment via Playwright to VS Code's Integrated Browser (requires `--remote-debugging-port` in VS Code's `argv.json`).
 
 **Tech Stack:** TypeScript, VS Code Extension API (v1.112+), `@modelcontextprotocol/sdk`, `@vscode/test-electron` for tests, `vsce` for publishing.
 
@@ -233,11 +235,13 @@ Create `src/mcpServer.ts`:
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import * as http from 'http';
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
 export class BrowserMcpServer {
     private server: McpServer;
     private httpServer: http.Server | null = null;
+    private sessions = new Map<string, StreamableHTTPServerTransport>();
 
     constructor() {
         this.server = new McpServer({
@@ -301,23 +305,85 @@ export class BrowserMcpServer {
         );
     }
 
+    private readBody(req: http.IncomingMessage): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+            let data = '';
+            req.on('data', (chunk: string) => data += chunk);
+            req.on('end', () => resolve(data ? JSON.parse(data) : undefined));
+            req.on('error', reject);
+        });
+    }
+
     start(port: number): Promise<void> {
         return new Promise((resolve, reject) => {
-            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
             this.httpServer = http.createServer(async (req, res) => {
-                await transport.handleRequest(req, res, req.body);
+                const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+
+                if (url.pathname === '/health') {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'ok', sessions: this.sessions.size }));
+                    return;
+                }
+
+                if (url.pathname !== '/mcp') {
+                    res.writeHead(404);
+                    res.end();
+                    return;
+                }
+
+                const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+                if (req.method === 'DELETE') {
+                    if (sessionId) {
+                        const t = this.sessions.get(sessionId);
+                        if (t) { await t.close(); this.sessions.delete(sessionId); }
+                    }
+                    res.writeHead(204);
+                    res.end();
+                    return;
+                }
+
+                let transport: StreamableHTTPServerTransport;
+                if (sessionId && this.sessions.has(sessionId)) {
+                    transport = this.sessions.get(sessionId)!;
+                } else {
+                    transport = new StreamableHTTPServerTransport({
+                        sessionIdGenerator: () => crypto.randomUUID(),
+                        onsessioninitialized: (id) => this.sessions.set(id, transport),
+                    });
+                    transport.onclose = () => {
+                        if (transport.sessionId) { this.sessions.delete(transport.sessionId); }
+                    };
+                    await this.server.connect(transport);
+                }
+
+                const body = req.method === 'POST' ? await this.readBody(req) : undefined;
+                await transport.handleRequest(req, res, body);
             });
-            this.server.connect(transport).then(() => {
-                this.httpServer!.listen(port, '127.0.0.1', () => {
-                    vscode.window.setStatusBarMessage(`Browser MCP: running on port ${port}`, 5000);
-                    resolve();
-                });
-            }).catch(reject);
+
+            this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'EADDRINUSE') {
+                    vscode.window.showErrorMessage(
+                        `Browser MCP: port ${port} is already in use. ` +
+                        `Change "integratedBrowserMcp.port" in VS Code settings.`
+                    );
+                }
+                reject(err);
+            });
+
+            this.httpServer.listen(port, '127.0.0.1', () => {
+                vscode.window.setStatusBarMessage(`Browser MCP: running on port ${port}`, 5000);
+                resolve();
+            });
         });
     }
 
     stop(): Promise<void> {
         return new Promise((resolve) => {
+            for (const transport of this.sessions.values()) {
+                transport.close().catch(() => {});
+            }
+            this.sessions.clear();
             if (this.httpServer) {
                 this.httpServer.close(() => resolve());
             } else {
@@ -400,19 +466,19 @@ Expected: Status bar shows "Browser MCP: running on port 3100" for 5 seconds.
 In a terminal (outside VS Code):
 
 ```bash
-curl -s http://localhost:3100/
+curl -s http://localhost:3100/health
 ```
 
-Expected: Some response (even an error body is fine — proves the server is up).
+Expected: `{"status":"ok","sessions":0}`
 
 - [ ] **Step 5: Configure Claude Code to connect**
 
-Add to `~/.claude/settings.json` under `"mcpServers"`:
+Add to `~/.claude.json` under `"mcpServers"` (NOT `~/.claude/settings.json`):
 
 ```json
 "integratedBrowser": {
   "type": "http",
-  "url": "http://localhost:3100"
+  "url": "http://localhost:3100/mcp"
 }
 ```
 
@@ -628,11 +694,10 @@ async function getPage(): Promise<Page> {
 }
 
 export async function openBrowserPage(url: string): Promise<string> {
-    // For CDP path, use VS Code's Simple Browser API to open the browser panel,
-    // then navigate via CDP
-    await vscode.commands.executeCommand('simpleBrowser.api.open', url);
-    // Give VS Code a moment to open the panel
-    await new Promise(r => setTimeout(r, 1000));
+    // NOTE: Do NOT use simpleBrowser.api.open — that opens the OLD Simple Browser
+    // (a webview iframe), not the Integrated Browser. The old Simple Browser has no CDP endpoint.
+    // The Integrated Browser panel must already be open (open it once manually from VS Code UI).
+    // We navigate to the URL via the existing CDP session.
     const p = await getPage();
     await p.goto(url);
     return `Navigated to ${url}`;
