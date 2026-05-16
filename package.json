@@ -24,6 +24,18 @@
       {
         "command": "integratedBrowserMcp.listTools",
         "title": "Integrated Browser MCP: List Available LM Tools (debug)"
+      },
+      {
+        "command": "integratedBrowserMcp.testInvoke",
+        "title": "Integrated Browser MCP: Test invokeTool (debug)"
+      },
+      {
+        "command": "integratedBrowserMcp.probeSchemas",
+        "title": "Integrated Browser MCP: Probe Tool Schemas (debug)"
+      },
+      {
+        "command": "integratedBrowserMcp.testPageTools",
+        "title": "Integrated Browser MCP: Test read_page + screenshot_page (debug)"
       }
     ],
     "configuration": {

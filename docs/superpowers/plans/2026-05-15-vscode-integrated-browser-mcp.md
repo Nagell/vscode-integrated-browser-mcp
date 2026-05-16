@@ -2,6 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Session Status (cut: 2026-05-15)
+
+| Unit | Status | Notes |
+| --- | --- | --- |
+| Task 1 — Experiment (U1) | ✅ Complete | Path A confirmed. All schemas + return formats confirmed. Zero unknowns. |
+| Task 2 — MCP Server (U2) | ⬜ Next | Build Express + stateful transport, `/mcp`, `/health`. Stub tools. |
+| Task 3A — invokeTool Bridge (U3) | ⬜ Blocked on U2 | Ready to implement. screenshot=JPEG DataPart, read_page=TextPart. |
+| Task 4 — Integration Tests | ⬜ Blocked on U3 | |
+| Task 5 — Publishing | ⬜ Blocked on U4 | |
+
+**Start next session at: Task 2 (U2) — MCP Server Foundation.**
+
 **Goal:** Build a VS Code extension that exposes VS Code's built-in Integrated Browser as an MCP server, so external agents like Claude Code can navigate, read, screenshot, and interact with web pages inside VS Code.
 
 > **Revision 2026-05-15 (post architectural review):** Several implementation errors from the first draft have been corrected. See [docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md](../../plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md) §"Context & Research" for full details. Affected sections: Task 2 (stateful transport, body parsing, `GET /health` route, Claude Code config file + URL path), Task 3B (removed incorrect `simpleBrowser.api.open` call from CDP path).
@@ -21,6 +33,7 @@
 VS Code has **two different embedded browser implementations** that coexist:
 
 #### 1. Simple Browser (old, still alive)
+
 - Built-in VS Code extension at `extensions/simple-browser/` in the VS Code source tree
 - Implemented as a **webview panel** — essentially an `<iframe>` inside VS Code's Electron shell
 - Constraints: no CORS bypass, no DevTools, no CDP access, cannot load most real websites
@@ -29,14 +42,17 @@ VS Code has **two different embedded browser implementations** that coexist:
 - Source: [simple-browser package.json](https://github.com/microsoft/vscode/blob/main/extensions/simple-browser/package.json)
 
 #### 2. Integrated Browser (new, the target)
+
 - Added in **VS Code 1.109 (January 2026)**
 - Full Chromium browser embedded in VS Code's Electron shell via CDP (Chrome DevTools Protocol)
 - Uses **Playwright** internally — `runPlaywrightCode` is one of its agent tools, which implies Playwright is the CDP bridge
 - Supports DevTools, debugging via `editor-browser` debug type, self-signed certs, and agent control
 - Debug launch config:
+
   ```json
   { "type": "editor-browser", "request": "launch", "url": "http://localhost:3000" }
   ```
+
 - Sources:
   - [VS Code 1.109 release notes](https://code.visualstudio.com/updates/v1_109)
   - [Integrated Browser docs](https://code.visualstudio.com/docs/debugtest/integrated-browser)
@@ -45,24 +61,25 @@ VS Code has **two different embedded browser implementations** that coexist:
 
 In **v1.110 (February 2026)**, VS Code added "Agentic browser tools" (experimental) behind the setting `workbench.browser.enableChatTools`. These are **VS Code built-in language model tools** (not MCP), registered internally and available to Copilot chat agents:
 
-| Tool | Purpose |
-|---|---|
-| `openBrowserPage` | Open a URL in the integrated browser |
-| `navigatePage` | Navigate to a new URL |
-| `readPage` | Read DOM content of the current page |
-| `screenshotPage` | Take a screenshot |
-| `clickElement` | Click a DOM element |
-| `hoverElement` | Hover |
-| `dragElement` | Drag |
-| `typeInPage` | Type text |
-| `handleDialog` | Accept/dismiss dialogs |
-| `runPlaywrightCode` | Execute arbitrary Playwright code |
+| Tool (doc name) | Actual registered ID | Purpose |
+| --- | --- | --- |
+| `openBrowserPage` | `open_browser_page` | Open a URL in the integrated browser |
+| `navigatePage` | `navigate_page` | Navigate to a new URL |
+| `readPage` | `read_page` | Read DOM content of the current page |
+| `screenshotPage` | `screenshot_page` | Take a screenshot |
+| `clickElement` | `click_element` | Click a DOM element |
+| `hoverElement` | `hover_element` | Hover |
+| `dragElement` | `drag_element` | Drag |
+| `typeInPage` | `type_in_page` | Type text |
+| `handleDialog` | `handle_dialog` | Accept/dismiss dialogs |
+| `runPlaywrightCode` | `run_playwright_code` | Execute arbitrary Playwright code |
 
-These are registered as `LanguageModelTool` instances inside VS Code. The VS Code API `vscode.lm.invokeTool(name, options, token)` became **stable in v1.112** and allows any extension to call registered tools — IF the tool IDs are known and IF they're accessible outside Copilot context. The tool names above may or may not be the exact IDs (they might be prefixed, e.g. `vscode_openBrowserPage`).
+These are registered as `LanguageModelTool` instances inside VS Code. The VS Code API `vscode.lm.invokeTool(name, options, token)` became **stable in v1.112** and allows any extension to call registered tools.
 
-**The key unknown:** Can a third-party extension call these tools via `vscode.lm.invokeTool`? Task 1 answers this.
+**Confirmed by U1 experiment (2026-05-15):** All 10 tools appear in `vscode.lm.tools` and are callable from a third-party extension. The IDs are snake_case — not camelCase as the VS Code docs imply. Path A is viable.
 
 Sources:
+
 - [VS Code 1.110 release notes — Agentic browser tools](https://code.visualstudio.com/updates/v1_110)
 - [Browser agent testing guide](https://code.visualstudio.com/docs/copilot/guides/browser-agent-testing-guide)
 - [vscode.lm API reference](https://code.visualstudio.com/api/references/vscode-api#lm)
@@ -70,7 +87,8 @@ Sources:
 ### Prior Art: vscode-simple-browser-mcp
 
 A community project already does this for the **old** Simple Browser:
-- Repo: https://github.com/SaViGnAnO/vscode-simple-browser-mcp
+
+- Repo: <https://github.com/SaViGnAnO/vscode-simple-browser-mcp>
 - Tools: `open_url`, `navigate`, `execute_javascript`, `get_console_logs`, `get_browser_state`
 - **Note:** No releases published — likely a proof-of-concept or WIP. Review the source before assuming it works.
 - **How it probably works:** Calls `simpleBrowser.api.open` via VS Code commands (the API command is still accessible on desktop even though the palette entry is hidden).
@@ -87,11 +105,13 @@ VS Code 1.110 added a "Share with Agent" button in the Integrated Browser toolba
 ## Architecture Decision: invokeTool vs CDP
 
 **Path A (preferred):** `vscode.lm.invokeTool()` bridge
+
 - If the built-in browser tools are callable from a third-party extension, just proxy them through MCP
 - Extension becomes a thin protocol adapter; VS Code does all the browser work
 - ~300 lines total
 
 **Path B (fallback):** Direct CDP
+
 - Open the Integrated Browser via `vscode.commands.executeCommand('workbench.action.openBrowser', ...)` or the `editor-browser` debug type
 - Find the CDP websocket endpoint (Playwright exposes it internally; may need to scan localhost ports 9222–9230, or use Electron's remote debugging)
 - Attach with `playwright.chromium.connectOverCDP(endpoint)`
@@ -99,6 +119,7 @@ VS Code 1.110 added a "Share with Agent" button in the Integrated Browser toolba
 - ~700 lines total, but works regardless of VS Code internals
 
 **Path C (Simple Browser fallback):** If Integrated Browser CDP is inaccessible
+
 - Use `simpleBrowser.api.open` to open pages in the old Simple Browser
 - Limited: no screenshots, no real JS execution, no click simulation
 - Only useful as a "read-only view" tool
@@ -110,7 +131,7 @@ Task 1 determines which path to take.
 
 ## File Structure
 
-```
+```text
 vscode-integrated-browser-mcp/
 ├── src/
 │   ├── extension.ts          # Activation, command registration, lifecycle
@@ -137,6 +158,7 @@ vscode-integrated-browser-mcp/
 This task answers the critical question before any real implementation. Run it first.
 
 **Files:**
+
 - Modify: `src/extension.ts`
 
 - [ ] **Step 1: Enable the experiment command**
@@ -163,6 +185,7 @@ A new VS Code window ("Extension Development Host") opens with your extension lo
 - [ ] **Step 4: Run the list-tools command**
 
 In the Extension Development Host window:
+
 - Open Command Palette (Ctrl+Shift+P)
 - Run: `Integrated Browser MCP: List Available LM Tools (debug)`
 - Check the "Browser MCP Debug" Output panel
@@ -174,6 +197,7 @@ Look for tool names containing: `browser`, `page`, `navigate`, `screenshot`, `cl
 **If you find browser tools** → The tool IDs are exactly what you need. Note them, proceed to Task 2A (invokeTool path).
 
 **If the tools list is empty or has no browser tools** → The browser tools may only appear after opening a browser tab or enabling Copilot chat. Try:
+
 1. Open an Integrated Browser tab: Command Palette → `Browser: Open Integrated Browser`
 2. Re-run the list-tools command
 
@@ -204,6 +228,7 @@ Recompile, relaunch, run `Integrated Browser MCP: testInvoke` from the palette.
 - [ ] **Step 7: Document findings here**
 
 Update this plan section with:
+
 - Tool IDs found
 - Whether `invokeTool` succeeded or threw
 - Error message if it failed
@@ -224,6 +249,7 @@ git commit -m "chore: initial scaffold + task 1 experiment"
 Build the MCP server layer that Claude Code (or any MCP client) connects to. This is independent of which browser bridge you use.
 
 **Files:**
+
 - Create: `src/mcpServer.ts`
 - Modify: `src/extension.ts`
 
@@ -498,6 +524,7 @@ git commit -m "feat: MCP server foundation with stub tools"
 Wire the stub tools from Task 2 to real `vscode.lm.invokeTool()` calls.
 
 **Files:**
+
 - Create: `src/browserBridge.ts`
 - Modify: `src/mcpServer.ts`
 
@@ -508,14 +535,14 @@ Create `src/browserBridge.ts` — replace `TOOL_IDS` with what Task 1 found:
 ```typescript
 import * as vscode from 'vscode';
 
-// Replace these with the actual IDs discovered in Task 1
+// IDs confirmed by U1 experiment (2026-05-15) — all snake_case
 const TOOL_IDS = {
-    openBrowserPage: 'REPLACE_WITH_ACTUAL_ID',
-    navigatePage: 'REPLACE_WITH_ACTUAL_ID',
-    readPage: 'REPLACE_WITH_ACTUAL_ID',
-    screenshotPage: 'REPLACE_WITH_ACTUAL_ID',
-    clickElement: 'REPLACE_WITH_ACTUAL_ID',
-    typeInPage: 'REPLACE_WITH_ACTUAL_ID',
+    openBrowserPage: 'open_browser_page',
+    navigatePage: 'navigate_page',
+    readPage: 'read_page',
+    screenshotPage: 'screenshot_page',
+    clickElement: 'click_element',
+    typeInPage: 'type_in_page',
 };
 
 async function invoke(toolName: keyof typeof TOOL_IDS, input: Record<string, unknown>) {
@@ -600,7 +627,8 @@ npm run compile
 Relaunch Extension Development Host (F5).
 
 In Claude Code:
-```
+
+```text
 Open http://example.com in the VS Code browser
 ```
 
@@ -609,18 +637,19 @@ Expected: Integrated Browser panel opens with example.com. If it does, the whole
 - [ ] **Step 4: Test screenshot returns image data**
 
 Ask Claude Code:
-```
+
+```text
 Take a screenshot of the current browser page
 ```
 
-Check whether the result includes base64 image data. If `screenshotPage` returns binary, you may need to wrap it as MCP image content:
+Confirmed by U1: `screenshot_page` returns a `DataPart` with `mimeType=image/jpeg`. Wrap as:
 
 ```typescript
 return {
     content: [{
         type: 'image',
         data: base64String,
-        mimeType: 'image/png',
+        mimeType: 'image/jpeg',
     }]
 };
 ```
@@ -639,6 +668,7 @@ git commit -m "feat: wire invokeTool browser bridge"
 If `vscode.lm.invokeTool` is blocked, use Playwright to attach to the Integrated Browser's CDP endpoint directly.
 
 **Files:**
+
 - Create: `src/cdpBridge.ts`
 - Modify: `src/mcpServer.ts`
 - Modify: `package.json` (add playwright dependency)
@@ -652,11 +682,13 @@ npm install playwright-core
 - [ ] **Step 2: Find the CDP endpoint**
 
 Add to `package.json` scripts:
+
 ```json
 "find-cdp": "node -e \"const net=require('net'); for(let p=9222;p<=9230;p++){const s=net.connect(p,'127.0.0.1',()=>{console.log('CDP port:',p);s.destroy()});s.on('error',()=>{})}\""
 ```
 
 Run while VS Code (with Integrated Browser open) is running:
+
 ```bash
 npm run find-cdp
 ```
@@ -748,7 +780,8 @@ npm run compile
 ```
 
 Relaunch, then in Claude Code:
-```
+
+```text
 Open http://example.com in the browser
 ```
 
@@ -766,6 +799,7 @@ git commit -m "feat: CDP browser bridge via Playwright"
 No unit tests for this kind of extension — the real test IS Claude Code talking to it. Document a repeatable manual test checklist that you run after any change.
 
 **Files:**
+
 - Create: `docs/testing.md`
 
 - [ ] **Step 1: Write the test runbook**
@@ -823,7 +857,7 @@ git commit -m "docs: add manual test runbook"
 
 - [ ] **Step 1: Create a Microsoft/Azure DevOps account**
 
-Go to https://marketplace.visualstudio.com/manage — sign in with a Microsoft account. Create a publisher ID (e.g. `yourusername`). Update `package.json` field `"publisher"` to match.
+Go to <https://marketplace.visualstudio.com/manage> — sign in with a Microsoft account. Create a publisher ID (e.g. `yourusername`). Update `package.json` field `"publisher"` to match.
 
 - [ ] **Step 2: Add marketplace metadata to package.json**
 
@@ -848,6 +882,7 @@ Place at `images/icon.png`. A simple browser + plug icon works. Use any image ed
 - [ ] **Step 4: Write README.md**
 
 Document:
+
 - What it does
 - Requirements (VS Code 1.112+, `workbench.browser.enableChatTools` enabled)
 - How to configure Claude Code's `settings.json` to connect
@@ -876,11 +911,11 @@ Restart VS Code and run through TC1–TC6 from `docs/testing.md`.
 vsce publish
 ```
 
-You'll be prompted for a Personal Access Token (PAT) — create one at https://dev.azure.com with `Marketplace (Publish)` scope.
+You'll be prompted for a Personal Access Token (PAT) — create one at <https://dev.azure.com> with `Marketplace (Publish)` scope.
 
 - [ ] **Step 8: Verify on marketplace**
 
-Go to https://marketplace.visualstudio.com/search?term=integrated+browser+mcp — confirm it appears within ~5 minutes.
+Go to <https://marketplace.visualstudio.com/search?term=integrated+browser+mcp> — confirm it appears within ~5 minutes.
 
 - [ ] **Step 9: Commit version bump and tag**
 
@@ -894,11 +929,15 @@ git tag v0.1.0
 
 ## Open Questions (update as you discover answers)
 
-- [ ] What are the exact tool IDs for the built-in browser agent tools? (Answer in Task 1)
-- [ ] Does `vscode.lm.invokeTool` work for built-in tools from a third-party extension?
-- [ ] Does VS Code expose a CDP port by default, or does it need `--remote-debugging-port`?
-- [ ] Does `screenshotPage` return PNG bytes or base64 or a URI?
-- [ ] Are browser tools available when the Integrated Browser is closed (lazy-loaded)?
+- [x] What are the exact tool IDs? **snake_case** — `open_browser_page`, `read_page`, `screenshot_page`, `navigate_page`, `click_element`, `type_in_page`, `hover_element`, `drag_element`, `handle_dialog`, `run_playwright_code`
+- [x] Does `vscode.lm.invokeTool` work for built-in tools from a third-party extension? **Yes — Path A confirmed viable**
+- [x] Does `open_browser_page` return page content? **Yes** — returns page ID (UUID) + accessibility tree snapshot. **Page ID is required by all other tools.**
+- [x] Does `click_element` take a CSS selector? **Supports both `ref` (snapshot ref ID, preferred) and `selector` (Playwright selector). `element` (human-readable description) is always required.**
+- [x] Does `type_in_page` take plain text? **Yes — `text` param. Also supports `key` for combos (e.g. "Enter", "Control+c").**
+- [x] Does VS Code expose a CDP port by default? **Moot — Path A confirmed, CDP not needed.**
+- [x] Does `screenshot_page` return PNG bytes or a TextPart? **`DataPart` with `mimeType=image/jpeg`** (~14KB). Bridge returns MCP image content with `mimeType: 'image/jpeg'`.
+- [x] What does `read_page` return? **Single `TextPart`** with accessibility tree snapshot (title, URL, snapshot) — same format as `open_browser_page` minus the Page ID prefix.
+- [ ] Are browser tools available when the Integrated Browser is closed?
 
 ---
 

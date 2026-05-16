@@ -60,6 +60,42 @@ internal browser capabilities.
 - MCP auth (token header) for shared/remote environments
 - `runPlaywrightCode` tool (arbitrary Playwright code — high power, high surface area, deferred)
 - `hoverElement`, `dragElement`, `handleDialog` tools (low-priority interaction tools)
+- **Element selection interception (post-v1, non-trivial):** VS Code's "select element" mode in
+  the Integrated Browser fires a payload (element screenshot + computed styles/position/inner text)
+  into Copilot chat. The goal is to **intercept that event** and route the same payload to Claude
+  Code via MCP instead — so the user can click an element in the browser and Claude Code
+  immediately receives it as context, without going through Copilot.
+
+  This is a **reactive/push model**: user action → VS Code event → MCP server pushes a notification
+  to the connected Claude Code client via the SSE stream (already supported by
+  `StreamableHTTPServerTransport`'s GET `/mcp` channel).
+
+  **What's unknown:**
+  - Whether VS Code exposes a public API event when the element-selection tool fires (check
+    `vscode.lm.onDidReceiveTool*` events, `vscode.commands`, or `window.*` listeners)
+  - Whether the payload can be intercepted before it reaches Copilot, or only observed alongside it
+
+  **What's already in place once v1 ships:**
+  - SSE push channel on `GET /mcp` — the transport can send server-initiated notifications
+  - Element screenshot: `screenshot_page` with `ref`/`selector` already captures per-element images
+  - Element data: `run_playwright_code` can reproduce the computed styles panel
+
+  **Investigate after v1:** search `vscode.d.ts` for events related to browser tool invocations;
+  check if registering a tool with the same name as VS Code's internal selection tool shadows it.
+
+  **Alternative approach — add our own toolbar button:**
+  Rather than intercepting the existing button, contribute our own button to the Integrated Browser
+  toolbar via `contributes.menus` → `editor/title` (with a `when` clause scoped to the browser
+  panel's `viewType`). Wire it to VS Code's underlying element-selection command, capture the
+  result, and push it to MCP. The user clicks our button instead of Copilot's — no hiding needed.
+  Hiding the existing button is probably not feasible cleanly from an extension anyway.
+
+  **The go/no-go gate for this entire idea:** does VS Code expose the element-picking interaction
+  (hover-to-highlight, click-to-select) as a callable command or API? If yes — invoke it, capture
+  the result, route to MCP. Probably ~20 lines. If no — we'd have to implement hover highlighting,
+  click capture, and inspector rendering ourselves via `run_playwright_code`. That's a full feature,
+  not worth building. Check `vscode.commands.getCommands()` for anything named `browser.*pick*` or
+  `browser.*inspect*` or similar before committing to this path.
 
 ---
 
@@ -91,16 +127,28 @@ is semantically wrong (though harmless at runtime). Fix: remove the `await`.
 non-chat callers. Confirmed by VS Code `vscode.d.ts` JSDoc: *"If the tool is being invoked outside
 of a chat request, `undefined` should be passed."* No chat session is required.
 
-### Whether Browser Tools Appear in `vscode.lm.tools` — Unconfirmed
+### Whether Browser Tools Appear in `vscode.lm.tools` — Confirmed (U1 result)
 
-The `vscode.lm.tools` array lists tools registered via `lm.registerTool()` from extensions. It is
-**unconfirmed** whether VS Code's built-in workbench-level browser tools (added in v1.110) appear
-in this array or are gated at the Copilot host level only. GitHub issue #313798 ("Browser: Enable
-browser tools in Agent Host sessions", filed May 2026, milestone 1.119.0) explicitly states the
-browser tools are still being expanded for more agent execution contexts — strongly implying they
-may not be available to arbitrary third-party `invokeTool` callers as of May 2026.
+**Confirmed by experiment (2026-05-15):** All 10 browser agent tools appear in `vscode.lm.tools`
+and are callable from a third-party extension via `vscode.lm.invokeTool`. **Path A is viable.**
 
-This is the primary risk. **U1 exists solely to resolve this.**
+Critical discovery: the tool IDs are **snake_case**, not camelCase as the VS Code docs imply:
+
+| Doc name | Actual registered ID |
+| --- | --- |
+| `openBrowserPage` | `open_browser_page` |
+| `navigatePage` | `navigate_page` |
+| `readPage` | `read_page` |
+| `screenshotPage` | `screenshot_page` |
+| `clickElement` | `click_element` |
+| `typeInPage` | `type_in_page` |
+| `hoverElement` | `hover_element` |
+| `dragElement` | `drag_element` |
+| `handleDialog` | `handle_dialog` |
+| `runPlaywrightCode` | `run_playwright_code` |
+
+All 10 tools were visible — including `run_playwright_code`, `hover_element`, `drag_element`, and
+`handle_dialog` which were deferred in v1 scope but are available for future expansion.
 
 ### CDP Is Not Exposed by Default
 
@@ -155,13 +203,62 @@ The existing plan omits the `/mcp` path. Config lives in `~/.claude.json` (user 
 `.mcp.json` in the project root (project scope). `~/.claude/settings.json` is **not** the correct
 location for MCP servers in Claude Code.
 
-### `invokeTool` Returns `LanguageModelToolResult`
+### `invokeTool` Returns `LanguageModelToolResult` — Confirmed (U1 result)
 
-The return type of `vscode.lm.invokeTool` is `LanguageModelToolResult`, which is an array of
-content parts. Page text would likely be a `LanguageModelTextPart`; screenshot image data would
-likely be a `LanguageModelDataPart` with base64-encoded PNG. The exact part types depend on how
-VS Code's internal browser tools construct their results — this cannot be confirmed without running
-the experiment (U1).
+**Confirmed by experiment (2026-05-15).** `open_browser_page` returns two `LanguageModelTextPart`
+items (internal `$mid: 21`):
+
+1. A **page ID**: `"Page ID: <uuid>\n\nSummary:\n"`
+2. An **accessibility tree snapshot**: page title, URL, and a structured semantic tree with element
+   refs (`[ref=e2]`, `[ref=e3]`, etc.)
+
+Example result from navigating to `https://example.com`:
+
+```text
+Page ID: 9b45ec59-8bfc-48fd-a22a-a553a4e6ac72
+
+Summary:
+Page Title: Example Domain
+URL: https://example.com/
+Snapshot:
+- generic [ref=e2]:
+  - heading "Example Domain" [level=1] [ref=e3]
+  - paragraph [ref=e4]: This domain is for use...
+  - paragraph [ref=e5]:
+    - link "Learn more" [ref=e6] [cursor=pointer]:
+      - /url: https://iana.org/domains/example
+```
+
+**Architectural implications discovered:**
+
+- **Page ID is a required input for all subsequent tools.** The bridge stores the `pageId` from
+  `open_browser_page` and passes it to every other call.
+
+- **Element targeting uses `ref` OR `selector` (both supported), plus required `element` field.**
+  `element` is a human-readable description (e.g. `"submit button"`) always required; `ref` uses
+  snapshot ref IDs (e.g. `"e6"`); `selector` uses Playwright selectors. `ref` is preferred.
+
+- **Content is an accessibility tree, not raw HTML.** Better for agent consumption.
+
+### Full Tool Schemas — Confirmed (U1, 2026-05-15)
+
+All inputs confirmed via `LanguageModelToolInformation.inputSchema`. Key params only:
+
+| Tool | Required inputs | Notable optional inputs |
+| --- | --- | --- |
+| `open_browser_page` | — | `url`, `forceNew` |
+| `read_page` | `pageId` | — |
+| `screenshot_page` | `pageId` | `ref`, `selector`, `element`, `scrollIntoViewIfNeeded` |
+| `navigate_page` | `pageId` | `type` (url/back/forward/reload), `url` |
+| `click_element` | `pageId`, `element` | `ref` or `selector` (one required per `$comment`), `dblClick`, `button` |
+| `hover_element` | `pageId`, `element` | `ref` or `selector` (one required per `$comment`) |
+| `type_in_page` | `pageId` | `text` or `key` (one required), `ref`, `selector`, `element` |
+| `drag_element` | `pageId`, `fromElement`, `toElement` | `fromRef`/`fromSelector`, `toRef`/`toSelector` |
+| `run_playwright_code` | `pageId` | `code` or `deferredResultId` (one required), `timeoutMs` |
+| `handle_dialog` | `pageId` | `acceptModal`, `promptText`, `selectFiles` |
+
+`url` on `open_browser_page` has no JSON Schema `required` entry — omitting it prompts the user
+to share an existing page instead.
 
 ---
 
@@ -203,14 +300,26 @@ the experiment (U1).
 - **Does Claude Code support HTTP MCP?** Yes — `type: "http"` with a full URL including path.
 - **Is Simple Browser a valid CDP target?** No — it is a webview iframe, not a Chromium instance.
 
-### Deferred to Implementation
+### Resolved by U1 Experiment (2026-05-15)
 
-- **Exact registered names of browser tools in `vscode.lm.tools`**: Documented as bare camelCase
-  (`openBrowserPage`, etc.) but the internal registration key is unconfirmed. Discovered in U1.
-- **Whether browser tools appear in `vscode.lm.tools` at all**: Issue #313798 suggests they may
-  not yet be available to third-party `invokeTool` callers. U1 is the only way to find out.
-- **What `LanguageModelToolResult` parts the browser tools return**: Text, image data, or
-  structured content — unknown until U1 runs.
+- **Exact registered names**: snake_case — `open_browser_page`, `read_page`, `screenshot_page`,
+  `navigate_page`, `click_element`, `type_in_page`, `hover_element`, `drag_element`,
+  `handle_dialog`, `run_playwright_code`. All 10 visible.
+- **Whether browser tools appear in `vscode.lm.tools` at all**: **Yes** — confirmed accessible to
+  third-party extensions. Issue #313798 concern did not materialise.
+- **`pageId` is required by every tool except `open_browser_page`**: The bridge must store the page
+  ID returned by `open_browser_page` and pass it to every subsequent call.
+- **`click_element` takes `element` (human-readable description, required) + one of `ref` or
+  `selector`**: Not just a CSS selector. The `element` field is a hint for the AI (e.g., `"submit
+  button"`); `ref` is the snapshot ref ID (e.g., `"e6"`); `selector` is a Playwright selector.
+- **`type_in_page` supports `text` OR `key`**: Can type strings or press key combos
+  (e.g., `"Enter"`, `"Control+c"`).
+- **`screenshot_page` return format**: **`DataPart` with `mimeType=image/jpeg`** (~14KB). Not PNG.
+  Bridge must return MCP image content with `mimeType: 'image/jpeg'`.
+- **`read_page` return format**: **Single `TextPart`** — accessibility tree snapshot (page title,
+  URL, snapshot). Same format as `open_browser_page` result but without the Page ID prefix.
+- **What `LanguageModelToolResult` parts the browser tools return**: Confirmed — text tools return
+  `TextPart` (`$mid: 21`); screenshot returns `DataPart` with `mimeType=image/jpeg`.
 - **Correct CDP port for VS Code's Integrated Browser**: Does not exist by default. If needed,
   user must set `--remote-debugging-port` in VS Code's `argv.json`. Port scanning (9222–9230)
   detects any existing Electron debugging port, not necessarily VS Code's browser.
@@ -223,7 +332,7 @@ the experiment (U1).
 > implementation specification. The implementing agent should treat it as context, not code to
 > reproduce.*
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  VS Code Extension Host Process                                  │
 │                                                                  │
@@ -262,7 +371,7 @@ the experiment (U1).
 
 ## Output Structure
 
-```
+```text
 src/
   extension.ts        — activation, lifecycle, command registration
   mcpServer.ts        — Express app, MCP SDK wiring, session management
@@ -280,7 +389,7 @@ docs/
 
 ## Implementation Units
 
-- U1. **Experiment: Probe invokeTool viability for browser tools**
+- U1. **Experiment: Probe invokeTool viability for browser tools** ✅ COMPLETE (2026-05-15)
 
 **Goal:** Determine whether VS Code's built-in browser agent tools are accessible via
 `vscode.lm.invokeTool` from a third-party extension. This is a binary decision gate: the answer
@@ -291,9 +400,11 @@ determines whether Path A or Path B is built.
 **Dependencies:** None
 
 **Files:**
+
 - Modify: `src/extension.ts`
 
 **Approach:**
+
 - Fix the existing `await vscode.lm.tools` bug (remove `await` — it's synchronous)
 - Add the debug command that lists all tool names from `vscode.lm.tools`
 - Separately attempt to call a browser tool with `toolInvocationToken: undefined`
@@ -303,6 +414,7 @@ determines whether Path A or Path B is built.
   or "access denied" error means Path B
 
 **Test scenarios:**
+
 - Happy path: tool names containing `browser`/`page`/`navigate`/`screenshot` appear in the list
   → note the exact name strings for the 10 browser agent tools
 - Edge case: list is empty → `workbench.browser.enableChatTools` is disabled; enable and retry
@@ -315,12 +427,14 @@ determines whether Path A or Path B is built.
   → Path A is structurally blocked; proceed to U2
 
 **Verification:**
-- One of three outcomes is definitively documented: (A) invokeTool works, (B) tools not visible
-  or invokeTool throws, (C) tools visible but need a specific context to call
+
+- ✅ Outcome A confirmed: invokeTool works from a third-party extension outside chat context.
+  All 10 browser tools visible. Full input schemas captured. pageId pattern understood.
+  `screenshot_page` confirmed: `DataPart` with `mimeType=image/jpeg`. `read_page` confirmed: single `TextPart`. All unknowns resolved.
 
 ---
 
-- U2. **MCP Server with correct stateful HTTP transport**
+- U2. **MCP Server with correct stateful HTTP transport** ← START HERE NEXT SESSION
 
 **Goal:** A correct, working Express + MCP SDK HTTP server running inside the extension host.
 Fixes the two transport bugs from the existing plan's Task 2.
@@ -330,11 +444,13 @@ Fixes the two transport bugs from the existing plan's Task 2.
 **Dependencies:** None (parallel with U1)
 
 **Files:**
+
 - Create: `src/mcpServer.ts`
 - Modify: `src/extension.ts`
 - Test: `src/test/extension.test.ts`
 
 **Approach:**
+
 - Use Express with `express.json()` middleware (or `createMcpExpressApp` helper from the SDK) to
   handle body parsing correctly
 - Use stateful `StreamableHTTPServerTransport` with a `sessionIdGenerator` (UUID) — one transport
@@ -349,6 +465,7 @@ Fixes the two transport bugs from the existing plan's Task 2.
 - Tool handlers at this stage return stub text responses (bridged in U3/U4)
 
 **Test scenarios:**
+
 - Happy path: server starts on port 3100, `GET /health` returns 200 with `{ status: 'ok' }`
 - Happy path: `POST /mcp` with valid JSON-RPC envelope returns a valid MCP response
 - Edge case: port 3100 is in use → EADDRINUSE error is caught and shown as a VS Code error
@@ -360,6 +477,7 @@ Fixes the two transport bugs from the existing plan's Task 2.
   `typeInPage`
 
 **Verification:**
+
 - `curl http://localhost:3100/health` returns 200 while extension is active
 - `/mcp` does not list tools (development server running in Extension Development Host)
 
@@ -375,20 +493,23 @@ discovered in U1.
 **Dependencies:** U1 (tool IDs known), U2 (server exists)
 
 **Files:**
+
 - Create: `src/browserBridge.ts`
 - Modify: `src/mcpServer.ts`
 
 **Approach:**
-- A `TOOL_IDS` map from logical names to the exact strings from `vscode.lm.tools`
+
+- A `TOOL_IDS` map from logical names to the exact strings from `vscode.lm.tools` (all snake_case — confirmed by U1)
 - Each function calls `vscode.lm.invokeTool(id, { input, toolInvocationToken: undefined }, token)`
 - The `LanguageModelToolResult` response is an array of parts; extract text parts as strings,
   data parts (images) as base64 strings to pass as MCP image content
-- For `screenshotPage`: if the result is a `LanguageModelDataPart` with `mime === 'image/png'`,
-  return MCP content `{ type: 'image', data: base64, mimeType: 'image/png' }`
+- For `screenshot_page`: result is a `LanguageModelDataPart` with `mimeType === 'image/jpeg'`;
+  return MCP content `{ type: 'image', data: base64, mimeType: 'image/jpeg' }`
 - Wrap every call in try/catch; on error return MCP error content rather than throwing (a thrown
   error in an MCP tool handler closes the transport)
 
 **Test scenarios:**
+
 - Happy path: `openBrowserPage('https://example.com')` → VS Code Integrated Browser panel opens
   at example.com; tool returns confirmation text
 - Happy path: `readPage()` after navigating to example.com → text content includes "Example Domain"
@@ -402,7 +523,8 @@ discovered in U1.
   content to client
 
 **Verification:**
-- Claude Code can instruct "Open https://example.com, read the heading, take a screenshot" as a
+
+- Claude Code can instruct "Open <https://example.com>, read the heading, take a screenshot" as a
   single agent session and all three succeed without error
 
 ---
@@ -417,11 +539,13 @@ discovered in U1.
 **Dependencies:** U2 (server exists). User must launch VS Code with `--remote-debugging-port`.
 
 **Files:**
+
 - Create: `src/cdpBridge.ts`
 - Modify: `src/mcpServer.ts`
 - Modify: `package.json` (add `playwright-core` dependency)
 
 **Approach:**
+
 - On first tool call, scan ports 9222–9231 for an open CDP WebSocket endpoint using a short TCP
   probe; connect via `playwright.chromium.connectOverCDP('http://127.0.0.1:<port>')`
 - Filter browser contexts/pages to find the Integrated Browser's page (by URL or title heuristic)
@@ -443,6 +567,7 @@ equivalent Integrated Browser command if one exists — or open the browser pane
 navigate via CDP `page.goto()`.
 
 **Test scenarios:**
+
 - Happy path: VS Code launched with `--remote-debugging-port=9222`; extension finds the port;
   `openBrowserPage('https://example.com')` navigates the Integrated Browser to example.com
 - Edge case: no CDP port open → notification appears; MCP tool returns actionable error text
@@ -452,6 +577,7 @@ navigate via CDP `page.goto()`.
 - Error path: `page.click('.nonexistent')` → Playwright throws; catch, return MCP error content
 
 **Verification:**
+
 - With `--remote-debugging-port=9222`, Claude Code can navigate, read, screenshot, and click
   without any invokeTool dependency
 
@@ -467,11 +593,13 @@ has an output channel for diagnostic logs; server recovers from unexpected error
 **Dependencies:** U2, U3 or U4
 
 **Files:**
+
 - Modify: `src/extension.ts`
 - Modify: `src/mcpServer.ts`
 - Modify: `src/browserBridge.ts` or `src/cdpBridge.ts`
 
 **Approach:**
+
 - Create a single named `OutputChannel` ('Integrated Browser MCP') in `extension.ts`; pass it
   to `McpBridgeServer` for structured logging (not `console.log`)
 - Wrap every MCP tool handler body in try/catch; on error log to the output channel and return
@@ -480,12 +608,14 @@ has an output channel for diagnostic logs; server recovers from unexpected error
 - On transport close (client disconnect), clean up the session map entry and log the event
 
 **Test scenarios:**
+
 - Error path: any bridge function throws an unexpected error → MCP tool returns error content;
   the MCP session remains open (not closed by the throw)
 - Happy path: Output channel 'Integrated Browser MCP' is visible in VS Code Output panel and
   shows tool call activity
 
 **Verification:**
+
 - Deliberately breaking a bridge function (returning a rejected Promise) does not close the MCP
   connection — subsequent tool calls still succeed
 
@@ -501,10 +631,12 @@ README explains the configuration step.
 **Dependencies:** U2 (correct port and route)
 
 **Files:**
+
 - Create: `README.md`
 - Create: `docs/testing.md` (manual test runbook)
 
 **Approach:**
+
 - Document the exact Claude Code config: `type: "http"`, `url: "http://localhost:3100/mcp"`
 - Note that `~/.claude.json` (not `~/.claude/settings.json`) is the correct file for user-scope
   MCP servers; `.mcp.json` in project root is the correct file for project-scope
@@ -515,10 +647,12 @@ README explains the configuration step.
   returns 200
 
 **Test scenarios:**
+
 - Test expectation: none — this unit contains only documentation and a test runbook, not
   behavioral code
 
 **Verification:**
+
 - A new user can follow README from scratch and have Claude Code talk to the browser within
   5 minutes (excluding VS Code restart for setting changes)
 
@@ -548,7 +682,7 @@ README explains the configuration step.
 ## Risks & Dependencies
 
 | Risk | Mitigation |
-|------|------------|
+| ---- | ---------- |
 | Browser tools not in `vscode.lm.tools` (issue #313798, May 2026) | U1 experiment confirms or denies. If denied, Path B (CDP) is the fallback. CDP requires user setup but is VS Code-version-independent. |
 | `invokeTool` works but requires active Copilot subscription | U1 would surface this. Alternative: Path B requires no Copilot. |
 | `--remote-debugging-port` not exposed by VS Code's Integrated Browser | Confirmed by research: not exposed by default. Path B requires adding it to `argv.json`. Surface this clearly in the error message — don't fail silently. |
