@@ -3,7 +3,7 @@ title: "feat: VS Code Integrated Browser MCP Extension"
 type: feat
 status: active
 date: 2026-05-15
-origin: docs/superpowers/plans/2026-05-15-vscode-integrated-browser-mcp.md
+origin: docs/plans/2026-05-15-vscode-integrated-browser-mcp-implementation.md
 ---
 
 # feat: VS Code Integrated Browser MCP Extension
@@ -15,7 +15,7 @@ external agents (Claude Code, etc.) can navigate, read, screenshot, and interact
 inside the editor. The extension starts an HTTP MCP server inside VS Code's extension host process
 on a configurable local port; Claude Code connects to it via its `type: "http"` MCP config.
 
-> **Companion to:** `docs/superpowers/plans/2026-05-15-vscode-integrated-browser-mcp.md` — that
+> **Companion to:** `docs/plans/2026-05-15-vscode-integrated-browser-mcp-implementation.md` — that
 > document is a detailed execution guide. This plan captures the architectural decisions, corrects
 > several implementation errors found in research, and is the definitive source for design rationale.
 
@@ -380,8 +380,7 @@ src/
 docs/
   plans/
     2026-05-15-001-feat-integrated-browser-mcp-plan.md  ← this file
-  superpowers/plans/
-    2026-05-15-vscode-integrated-browser-mcp.md         ← execution guide (companion)
+    2026-05-15-vscode-integrated-browser-mcp-implementation.md         ← execution guide (companion)
   testing.md          — manual test runbook
 ```
 
@@ -711,7 +710,7 @@ README explains the configuration step.
 
 ## Sources & References
 
-- **Origin document:** [docs/superpowers/plans/2026-05-15-vscode-integrated-browser-mcp.md](../superpowers/plans/2026-05-15-vscode-integrated-browser-mcp.md)
+- **Origin document:** [docs/plans/2026-05-15-vscode-integrated-browser-mcp-implementation.md](./2026-05-15-vscode-integrated-browser-mcp-implementation.md)
 - [VS Code lm API reference — invokeTool](https://code.visualstudio.com/api/references/vscode-api#lm)
 - [VS Code 1.110 release notes — Agentic browser tools](https://code.visualstudio.com/updates/v1_110)
 - [Integrated browser docs](https://code.visualstudio.com/docs/debugtest/integrated-browser)

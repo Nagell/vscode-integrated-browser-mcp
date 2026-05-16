@@ -16,7 +16,7 @@
 
 **Goal:** Build a VS Code extension that exposes VS Code's built-in Integrated Browser as an MCP server, so external agents like Claude Code can navigate, read, screenshot, and interact with web pages inside VS Code.
 
-> **Revision 2026-05-15 (post architectural review):** Several implementation errors from the first draft have been corrected. See [docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md](../../plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md) §"Context & Research" for full details. Affected sections: Task 2 (stateful transport, body parsing, `GET /health` route, Claude Code config file + URL path), Task 3B (removed incorrect `simpleBrowser.api.open` call from CDP path).
+> **Revision 2026-05-15 (post architectural review):** Several implementation errors from the first draft have been corrected. See [./2026-05-15-001-feat-integrated-browser-mcp-plan.md](./2026-05-15-001-feat-integrated-browser-mcp-plan.md) §"Context & Research" for full details. Affected sections: Task 2 (stateful transport, body parsing, `GET /health` route, Claude Code config file + URL path), Task 3B (removed incorrect `simpleBrowser.api.open` call from CDP path).
 
 **Architecture:** A VS Code extension activates on startup, starts an HTTP MCP server on a configurable local port, and bridges MCP tool calls to VS Code's internal browser APIs. The primary path uses `vscode.lm.invokeTool()` to call VS Code's own built-in browser agent tools; if those are locked to Copilot-only context, a fallback uses direct CDP attachment via Playwright to VS Code's Integrated Browser (requires `--remote-debugging-port` in VS Code's `argv.json`).
 
@@ -139,8 +139,8 @@ vscode-integrated-browser-mcp/
 │   ├── browserBridge.ts      # Calls vscode.lm.invokeTool (Path A)
 │   └── cdpBridge.ts          # Playwright CDP connection (Path B, add if needed)
 ├── docs/
-│   └── superpowers/plans/
-│       └── 2026-05-15-vscode-integrated-browser-mcp.md  ← this file
+│   └── plans/
+│       └── 2026-05-15-vscode-integrated-browser-mcp-implementation.md  ← this file
 ├── package.json              # Extension manifest + npm scripts
 ├── tsconfig.json
 ├── .gitignore
