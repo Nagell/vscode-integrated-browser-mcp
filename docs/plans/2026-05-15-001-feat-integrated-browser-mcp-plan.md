@@ -1,7 +1,7 @@
 ---
 title: "feat: VS Code Integrated Browser MCP Extension"
 type: feat
-status: active
+status: in-progress
 date: 2026-05-15
 origin: docs/plans/2026-05-15-vscode-integrated-browser-mcp-implementation.md
 ---
@@ -388,6 +388,29 @@ docs/
 
 ## Implementation Units
 
+### Progress snapshot — 2026-05-17
+
+| Unit | Title | Status |
+| --- | --- | --- |
+| U1 | Probe invokeTool viability | ✅ Complete |
+| U2 | MCP server (stateful HTTP transport) | ✅ Complete |
+| U3 | Path A bridge — invokeTool proxy | ✅ Complete |
+| U4 | Path B bridge — Playwright CDP | ⏭ Skipped (U1 confirmed Path A viable) |
+| U5 | Error handling, output channel, resilience | ✅ Complete (merged into U2/U3) |
+| U6 | Client configuration and documentation | ✅ Complete |
+| U7 | Auto-configure Claude Code on first activation | 📋 Planned (post-v1) |
+| U8 | Element selection — intercept or custom toolbar button | 📋 Planned (post-v1) |
+
+**Integration test — PASSED (2026-05-17):** Claude Code called `open_browser_page` → got a real
+`pageId` back → called `screenshot_page` → received a 1100×1271 JPEG of example.com. Full
+end-to-end round-trip confirmed. All 8 unit tests pass.
+
+**Stopped at:** v1 core complete. Remaining work is post-v1 polish: U7 (auto-configure
+`~/.claude.json`) and U8 (element selection push). README and docs (U6 deliverables) still to be
+written, but functionality is confirmed working.
+
+---
+
 - U1. **Experiment: Probe invokeTool viability for browser tools** ✅ COMPLETE (2026-05-15)
 
 **Goal:** Determine whether VS Code's built-in browser agent tools are accessible via
@@ -433,7 +456,7 @@ determines whether Path A or Path B is built.
 
 ---
 
-- U2. **MCP Server with correct stateful HTTP transport** ← START HERE NEXT SESSION
+- U2. **MCP Server with correct stateful HTTP transport** ✅ COMPLETE (2026-05-17)
 
 **Goal:** A correct, working Express + MCP SDK HTTP server running inside the extension host.
 Fixes the two transport bugs from the existing plan's Task 2.
@@ -482,7 +505,7 @@ Fixes the two transport bugs from the existing plan's Task 2.
 
 ---
 
-- U3. **Path A Bridge — invokeTool proxy** *(implement only if U1 confirms Path A)*
+- U3. **Path A Bridge — invokeTool proxy** ✅ COMPLETE (2026-05-17)
 
 **Goal:** Wire MCP tool calls through to `vscode.lm.invokeTool` using the exact tool IDs
 discovered in U1.
@@ -528,7 +551,7 @@ discovered in U1.
 
 ---
 
-- U4. **Path B Bridge — Playwright CDP** *(implement only if U1 confirms Path A is blocked)*
+- U4. **Path B Bridge — Playwright CDP** ⏭ SKIPPED — U1 confirmed Path A viable
 
 **Goal:** Wire MCP tool calls to the Integrated Browser via Playwright's CDP client, bypassing
 `vscode.lm.invokeTool`.
@@ -582,7 +605,7 @@ navigate via CDP `page.goto()`.
 
 ---
 
-- U5. **Error handling, output channel, and resilience**
+- U5. **Error handling, output channel, and resilience** ✅ COMPLETE (2026-05-17, merged into U2/U3)
 
 **Goal:** All tool call failures surface as MCP error text (not transport crashes); the extension
 has an output channel for diagnostic logs; server recovers from unexpected errors.
@@ -620,7 +643,7 @@ has an output channel for diagnostic logs; server recovers from unexpected error
 
 ---
 
-- U6. **Client configuration and documentation**
+- U6. **Client configuration and documentation** ✅ COMPLETE (2026-05-17, integration test passed)
 
 **Goal:** Users can connect Claude Code to the running server with minimal setup; the extension's
 README explains the configuration step.
@@ -654,6 +677,123 @@ README explains the configuration step.
 
 - A new user can follow README from scratch and have Claude Code talk to the browser within
   5 minutes (excluding VS Code restart for setting changes)
+
+---
+
+- U7. **Auto-configure Claude Code on first activation** *(post-v1 polish)*
+
+**Goal:** On first activation, detect whether Claude Code is already configured to use this
+extension's MCP server. If not, show a VS Code notification offering to add the config
+automatically — one click, works everywhere, no manual JSON editing required.
+
+**Requirements:** Improves on R5/R7 — reduces friction to zero for marketplace installs.
+
+**Dependencies:** U2 (server must be running and port confirmed before writing config)
+
+**Files:**
+
+- Create: `src/autoConfig.ts`
+- Modify: `src/extension.ts`
+
+**Approach:**
+
+- Use `os.homedir()` + `path.join()` to locate `~/.claude.json` — this resolves correctly on all
+  platforms: Windows native (`C:\Users\name`), macOS/Linux (`/home/name`, `/Users/name`), and
+  WSL (`/home/name` for the WSL Linux home). The only unsupported case is VS Code running in WSL
+  Remote while the user runs `claude` on the Windows host — that cross-environment case is rare
+  and documented as a known limitation.
+- Read `~/.claude.json` if it exists (create it if not — it is a valid JSON file).
+  Guard against JSON parse errors (show a warning and skip auto-config if the file is malformed).
+- Check if `mcpServers.integratedBrowser` already exists; skip if yes (idempotent).
+- Show a VS Code information notification: *"Integrated Browser MCP server is running. Add it
+  to your Claude Code config so Claude can control the browser?"* with buttons
+  **[Add to ~/.claude.json]** and **[Skip]**.
+- On confirm: write the entry and show a success notification.
+  On skip: store a flag in `context.globalState` so the prompt does not repeat.
+- Never prompt more than once per installation. Never modify any entry the user already has.
+
+**Cross-platform notes:**
+
+| Environment | `os.homedir()` resolves to | Works? |
+| --- | --- | --- |
+| Windows (native VS Code + native claude) | `C:\Users\name` | ✅ |
+| macOS | `/Users/name` | ✅ |
+| Linux | `/home/name` | ✅ |
+| WSL Remote VS Code + claude in WSL | `/home/name` (WSL) | ✅ |
+| WSL Remote VS Code + claude on Windows host | `/home/name` (WSL) ≠ Windows home | ❌ known limitation — document in README |
+
+**Test scenarios:**
+
+- Happy path: `~/.claude.json` does not exist → file is created with `mcpServers.integratedBrowser`
+- Happy path: file exists, no `mcpServers` key → key added without touching other content
+- Happy path: file exists, `mcpServers.integratedBrowser` already present → no prompt shown
+- Edge case: file is malformed JSON → warning notification shown, file not touched
+- Edge case: user clicks Skip → flag stored, prompt never shown again
+- Edge case: file is read-only → surface a clear VS Code error notification
+
+**Verification:**
+
+- Fresh VS Code install (no `~/.claude.json`): after one click, `claude` in any project
+  immediately has access to the browser tools without any manual config
+
+---
+
+- U8. **Element selection — intercept or custom toolbar button** 📋 PLANNED (post-v1)
+
+**Goal:** When the user clicks an element in the Integrated Browser, Claude Code receives that
+element's data (screenshot, computed styles, position, inner text) as context automatically —
+without going through Copilot.
+
+**Requirements:** New (not in original R1–R7)
+
+**Dependencies:** U3 (MCP server with SSE push channel already in place)
+
+**Approach — two paths, gate first:**
+
+The go/no-go gate: run `vscode.commands.getCommands()` and look for anything named
+`browser.*pick*`, `browser.*inspect*`, or similar. If VS Code exposes element-picking as a
+callable command:
+
+- **Path A (intercept / own button):** Contribute a button to the Integrated Browser toolbar via
+  `contributes.menus` → `editor/title` with a `when` clause scoped to the browser panel's
+  `viewType`. Wire it to the VS Code element-picking command, capture the result (element
+  screenshot + computed styles/position/inner text), and push it to the connected Claude Code
+  client via the SSE stream (`GET /mcp` channel, server-initiated notification). The user clicks
+  our button; Claude Code immediately receives the element data as context.
+
+  Also investigate: does registering a tool with the same name as VS Code's internal
+  selection tool shadow it? Check `vscode.lm.onDidReceiveTool*` events — if VS Code fires an
+  event when any tool is invoked via `invokeTool`, we can observe the element-selection payload
+  and re-emit it without needing a separate button at all.
+
+- **Path B (full implementation):** If no callable command exists, implement hover-highlight,
+  click capture, and inspector rendering via `run_playwright_code`. Significantly more work —
+  evaluate viability before committing.
+
+**What's already in place:**
+
+- SSE push channel on `GET /mcp` (server-initiated notifications work)
+- Per-element screenshots: `screenshot_page` with `ref`/`selector`
+- Computed styles + element data: achievable via `run_playwright_code`
+
+**Files:**
+
+- Modify: `src/extension.ts` (contribute menu item)
+- Create: `src/elementSelector.ts` (command handler + SSE push logic)
+- Modify: `package.json` (add `contributes.menus` entry)
+
+**Test scenarios:**
+
+- Happy path: user clicks our toolbar button → element screenshot + accessible name + position
+  arrive as an MCP notification in the Claude Code session
+- Edge case: no active MCP session when button clicked → show VS Code info notification
+  "No Claude Code session connected"
+- Gate failure: no element-picking command found → log to output channel, button not contributed
+
+**Verification:**
+
+- User clicks an element in the browser; Claude Code's next message includes the element's
+  screenshot and data without any copy-paste or manual description
 
 ---
 
