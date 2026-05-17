@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.0...vscode-integrated-browser-mcp-v0.1.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* approve esbuild build scripts in pnpm lockfile for CI ([04100f3](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/04100f3f5da289306a0b4649917586bc7aefa65d))
+* approve esbuild build scripts in pnpm lockfile for CI ([6a80bee](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/6a80bee68e21c49e9fe0b3293274d5cbed7dc8a1))
+
 ## [0.1.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.0.1...vscode-integrated-browser-mcp-v0.1.0) (2026-05-17)
 
 
