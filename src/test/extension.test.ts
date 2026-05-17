@@ -15,7 +15,7 @@ function get(url: string): Promise<{ status: number; body: string }> {
     });
 }
 
-function post(url: string, body: unknown): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+function post(url: string, body: unknown, extraHeaders?: Record<string, string>): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify(body);
         const options = new URL(url);
@@ -27,7 +27,8 @@ function post(url: string, body: unknown): Promise<{ status: number; body: strin
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json, text/event-stream',
-                'Content-Length': Buffer.byteLength(payload)
+                'Content-Length': Buffer.byteLength(payload),
+                ...extraHeaders
             }
         }, (res) => {
             let data = '';
@@ -36,6 +37,27 @@ function post(url: string, body: unknown): Promise<{ status: number; body: strin
         });
         req.on('error', reject);
         req.write(payload);
+        req.end();
+    });
+}
+
+function del(url: string, sessionId?: string): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+        const options = new URL(url);
+        const headers: Record<string, string> = {};
+        if (sessionId) { headers['mcp-session-id'] = sessionId; }
+        const req = http.request({
+            hostname: options.hostname,
+            port: options.port,
+            path: options.pathname,
+            method: 'DELETE',
+            headers
+        }, (res) => {
+            let data = '';
+            res.on('data', (c) => { data += c; });
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+        });
+        req.on('error', reject);
         req.end();
     });
 }
@@ -88,6 +110,16 @@ suite('McpBridgeServer', () => {
         assert.strictEqual(res.status, 400);
     });
 
+    test('POST /mcp with stale session ID and non-initialize body returns 400', async () => {
+        const res = await post(`http://127.0.0.1:${TEST_PORT}/mcp`, {
+            jsonrpc: '2.0',
+            method: 'tools/call',
+            params: { name: 'list_pages', arguments: {} },
+            id: 1
+        }, { 'mcp-session-id': '00000000-0000-0000-0000-000000000000' });
+        assert.strictEqual(res.status, 400);
+    });
+
     test('MCP initialize request creates a session and returns mcp-session-id', async () => {
         const res = await post(`http://127.0.0.1:${TEST_PORT}/mcp`, {
             jsonrpc: '2.0',
@@ -111,6 +143,27 @@ suite('McpBridgeServer', () => {
     test('GET /mcp without session ID returns 400', async () => {
         const res = await get(`http://127.0.0.1:${TEST_PORT}/mcp`);
         assert.strictEqual(res.status, 400);
+    });
+
+    test('DELETE /mcp without session ID returns 400', async () => {
+        const res = await del(`http://127.0.0.1:${TEST_PORT}/mcp`);
+        assert.strictEqual(res.status, 400);
+    });
+
+    test('stop() with active session resets sessionCount to 0', async () => {
+        const res = await post(`http://127.0.0.1:${TEST_PORT}/mcp`, {
+            jsonrpc: '2.0', method: 'initialize',
+            params: { protocolVersion: '2024-11-05', clientInfo: { name: 'test', version: '0.0.0' }, capabilities: {} },
+            id: 1
+        });
+        assert.ok(res.headers['mcp-session-id'], 'session should be created');
+        assert.strictEqual(server.sessionCount, 1);
+
+        await server.stop();
+        assert.strictEqual(server.sessionCount, 0);
+
+        // Restart so teardown doesn't error
+        await server.start(TEST_PORT);
     });
 
     suite('after MCP session initialised', () => {
@@ -155,6 +208,21 @@ suite('McpBridgeServer', () => {
             return JSON.parse(line.slice('data:'.length).trim());
         }
 
+        test('sessionCount is 1 after session initialized', () => {
+            assert.strictEqual(server.sessionCount, 1);
+        });
+
+        test('/health shows sessions: 1 after session initialized', async () => {
+            const res = await get(`http://127.0.0.1:${TEST_PORT}/health`);
+            const body = JSON.parse(res.body);
+            assert.strictEqual(body.sessions, 1);
+        });
+
+        test('DELETE /mcp with valid session ID returns 2xx', async () => {
+            const res = await del(`http://127.0.0.1:${TEST_PORT}/mcp`, sessionId);
+            assert.ok(res.status >= 200 && res.status < 300, `expected 2xx, got ${res.status}: ${res.body}`);
+        });
+
         test('tools/list returns all 8 expected tools', async () => {
             const res = await rpc('tools/list', {}, 2);
             assert.strictEqual(res.status, 200);
@@ -165,6 +233,7 @@ suite('McpBridgeServer', () => {
                 'read_page', 'screenshot_page', 'navigate_page',
                 'click_element', 'type_in_page'
             ];
+            assert.strictEqual(names.length, 8, `expected 8 tools, got: ${names.join(', ')}`);
             for (const name of expected) {
                 assert.ok(names.includes(name), `expected tool "${name}" in list, got: ${names.join(', ')}`);
             }
@@ -184,7 +253,7 @@ suite('McpBridgeServer', () => {
             const payload = parseResult(res.body) as { result: { content: { type: string; text: string }[]; isError?: boolean } };
             assert.ok(!payload.result.isError, 'expected isError to be falsy for unknown pageId');
             const text = payload.result.content.find(c => c.type === 'text')?.text ?? '';
-            assert.ok(text.includes('closed'), `expected "closed" in response, got: ${text}`);
+            assert.ok(text.includes('removed from session'), `expected "removed from session" in response, got: ${text}`);
         });
     });
 
