@@ -4,10 +4,12 @@
   "description": "Exposes VS Code's Integrated Browser as an MCP server so external agents (Claude Code, etc.) can control it",
   "version": "0.0.1",
   "publisher": "Nagell",
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.112.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "keywords": [
@@ -35,18 +37,6 @@
       {
         "command": "integratedBrowserMcp.listTools",
         "title": "Integrated Browser MCP: List Available LM Tools (debug)"
-      },
-      {
-        "command": "integratedBrowserMcp.testInvoke",
-        "title": "Integrated Browser MCP: Test invokeTool (debug)"
-      },
-      {
-        "command": "integratedBrowserMcp.probeSchemas",
-        "title": "Integrated Browser MCP: Probe Tool Schemas (debug)"
-      },
-      {
-        "command": "integratedBrowserMcp.testPageTools",
-        "title": "Integrated Browser MCP: Test read_page + screenshot_page (debug)"
       }
     ],
     "configuration": {
@@ -90,6 +80,10 @@
     "@modelcontextprotocol/sdk": "^1.11.0",
     "express": "^5.2.1",
     "zod": "^4.4.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nagell/vscode-integrated-browser-mcp"
   },
   "license": "MIT",
   "pnpm": {

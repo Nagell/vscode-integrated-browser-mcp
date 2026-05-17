@@ -54,11 +54,11 @@ VS Code Extension Host
          VS Code's built-in browser agent tools
          (same tools Copilot uses internally)
 
-Claude Code (external CLI)
-  └─ .mcp.json → http://localhost:3100/mcp
+MCP client (Claude Code, Cline, Continue.dev, …)
+  └─ http://localhost:3100/mcp
 ```
 
-Each connected Claude Code session gets its own `StreamableHTTPServerTransport` instance and a `pages` map tracking open page IDs. Page IDs are assigned by VS Code and required by every browser tool call after `open_browser_page`.
+Each connected MCP client session gets its own `StreamableHTTPServerTransport` instance and a `pages` map tracking open page IDs. Page IDs are assigned by VS Code and required by every browser tool call after `open_browser_page`.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
@@ -105,7 +105,7 @@ It is excluded from the packaged `.vsix` via `.vscodeignore` — end users who i
 
 ## Running the extension
 
-1. Compile: `npm run compile`
+1. Compile: `pnpm run compile`
 2. Press **F5** in VS Code to launch the Extension Development Host
 3. In the dev host window, open **User Settings (JSON)** and add:
 
@@ -126,10 +126,10 @@ The **Integrated Browser MCP** output channel (View → Output → select from d
 ### Automated tests
 
 ```sh
-npm test
+pnpm test
 ```
 
-Runs 11 tests against a real `McpBridgeServer` instance started on port 3199 inside VS Code's test extension host. Covers:
+Runs automated tests against a real `McpBridgeServer` instance started on port 3199 inside VS Code's test extension host. Covers:
 
 - HTTP infrastructure (health endpoint, session lifecycle, error responses, EADDRINUSE)
 - MCP protocol (all 8 tools registered, `list_pages` empty on fresh session, `close_page` succeeds with unknown page ID)
