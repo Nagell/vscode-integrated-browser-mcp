@@ -3,6 +3,8 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  onlyBuiltDependencies:
+    - esbuild
 
 importers:
 
@@ -2070,6 +2072,7 @@ snapshots:
       es-errors: 1.3.0
 
   esbuild@0.28.0:
+    requiresBuild: true
     optionalDependencies:
       '@esbuild/aix-ppc64': 0.28.0
       '@esbuild/android-arm': 0.28.0
