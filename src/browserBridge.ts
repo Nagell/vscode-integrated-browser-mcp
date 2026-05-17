@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+export type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+
 const BROWSER_TOOLS = {
     openBrowserPage: 'open_browser_page',
     readPage: 'read_page',
@@ -7,6 +9,7 @@ const BROWSER_TOOLS = {
     navigatePage: 'navigate_page',
     clickElement: 'click_element',
     typeInPage: 'type_in_page',
+    // No dedicated close_page LM tool exists; run_playwright_code is the only way to programmatically close a tab.
     runPlaywrightCode: 'run_playwright_code',
 } as const;
 
@@ -19,17 +22,19 @@ async function invoke(toolId: string, input: Record<string, unknown>): Promise<v
     }
 }
 
-function resultToMcp(result: vscode.LanguageModelToolResult): { type: 'text'; text: string }[] | { type: 'image'; data: string; mimeType: string }[] {
-    const out: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [];
+function resultToMcp(result: vscode.LanguageModelToolResult): McpContent[] {
+    const out: McpContent[] = [];
     for (const part of result.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
             out.push({ type: 'text', text: part.value });
         } else if (part instanceof vscode.LanguageModelDataPart) {
             const b64 = Buffer.from(part.data).toString('base64');
             out.push({ type: 'image', data: b64, mimeType: part.mimeType });
+        } else {
+            console.warn('[browserBridge] unknown content part type dropped');
         }
     }
-    return out as ReturnType<typeof resultToMcp>;
+    return out;
 }
 
 function extractPageId(result: vscode.LanguageModelToolResult): string | undefined {
@@ -44,7 +49,7 @@ function extractPageId(result: vscode.LanguageModelToolResult): string | undefin
 
 export interface OpenPageResult {
     pageId: string;
-    content: ReturnType<typeof resultToMcp>;
+    content: McpContent[];
 }
 
 export async function openBrowserPage(url?: string, forceNew?: boolean): Promise<OpenPageResult> {
@@ -59,12 +64,12 @@ export async function openBrowserPage(url?: string, forceNew?: boolean): Promise
     return { pageId, content: resultToMcp(result) };
 }
 
-export async function readPage(pageId: string): Promise<ReturnType<typeof resultToMcp>> {
+export async function readPage(pageId: string): Promise<McpContent[]> {
     const result = await invoke(BROWSER_TOOLS.readPage, { pageId });
     return resultToMcp(result);
 }
 
-export async function screenshotPage(pageId: string, ref?: string, selector?: string): Promise<ReturnType<typeof resultToMcp>> {
+export async function screenshotPage(pageId: string, ref?: string, selector?: string): Promise<McpContent[]> {
     const input: Record<string, unknown> = { pageId };
     if (ref) { input.ref = ref; }
     if (selector) { input.selector = selector; }
@@ -72,7 +77,7 @@ export async function screenshotPage(pageId: string, ref?: string, selector?: st
     return resultToMcp(result);
 }
 
-export async function navigatePage(pageId: string, type?: string, url?: string): Promise<ReturnType<typeof resultToMcp>> {
+export async function navigatePage(pageId: string, type?: string, url?: string): Promise<McpContent[]> {
     const input: Record<string, unknown> = { pageId };
     if (type) { input.type = type; }
     if (url) { input.url = url; }
@@ -80,7 +85,7 @@ export async function navigatePage(pageId: string, type?: string, url?: string):
     return resultToMcp(result);
 }
 
-export async function clickElement(pageId: string, element: string, ref?: string, selector?: string): Promise<ReturnType<typeof resultToMcp>> {
+export async function clickElement(pageId: string, element: string, ref?: string, selector?: string): Promise<McpContent[]> {
     const input: Record<string, unknown> = { pageId, element };
     if (ref) { input.ref = ref; }
     if (selector) { input.selector = selector; }
@@ -88,16 +93,12 @@ export async function clickElement(pageId: string, element: string, ref?: string
     return resultToMcp(result);
 }
 
-export async function closePage(pageId: string): Promise<ReturnType<typeof resultToMcp>> {
-    try {
-        const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code: 'await page.close();' });
-        return resultToMcp(result);
-    } catch {
-        return [{ type: 'text', text: 'Page removed from session (browser tab may still be visible).' }];
-    }
+export async function closePage(pageId: string): Promise<McpContent[]> {
+    const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code: 'await page.close();' });
+    return resultToMcp(result);
 }
 
-export async function typeInPage(pageId: string, text?: string, key?: string, ref?: string, selector?: string, element?: string): Promise<ReturnType<typeof resultToMcp>> {
+export async function typeInPage(pageId: string, text?: string, key?: string, ref?: string, selector?: string, element?: string): Promise<McpContent[]> {
     const input: Record<string, unknown> = { pageId };
     if (text) { input.text = text; }
     if (key) { input.key = key; }
