@@ -403,7 +403,7 @@ docs/
 
 **Integration test — PASSED (2026-05-17):** Claude Code called `open_browser_page` → got a real
 `pageId` back → called `screenshot_page` → received a 1100×1271 JPEG of example.com. Full
-end-to-end round-trip confirmed. All 8 unit tests pass.
+end-to-end round-trip confirmed. 17 unit tests pass (expanded from 11 in code review pass, 2026-05-17).
 
 **Stopped at:** v1 core complete. Remaining work is post-v1 polish: U7 (auto-configure
 `~/.claude.json`) and U8 (element selection push). README and docs (U6 deliverables) still to be
@@ -826,7 +826,7 @@ callable command:
 | `invokeTool` works but requires active Copilot subscription | U1 would surface this. Alternative: Path B requires no Copilot. |
 | `--remote-debugging-port` not exposed by VS Code's Integrated Browser | Confirmed by research: not exposed by default. Path B requires adding it to `argv.json`. Surface this clearly in the error message — don't fail silently. |
 | Port 3100 conflict with another dev tool | Configurable. On EADDRINUSE show a VS Code notification with instructions to change the port. |
-| Session leak on client disconnect | Hook transport `onclose` event to remove from session map. Add a session TTL (e.g., 1 hour) as a safety net. |
+| Session leak on client disconnect | Mitigated: dual cleanup via `onsessionclosed` (clean MCP teardown) + `transport.onclose` (abrupt drop fallback). Session TTL not yet implemented — still a gap for long-lived disconnected sessions. |
 | MCP SDK API mismatch (SDK evolves) | Pin `@modelcontextprotocol/sdk` to a specific minor version in `package.json`. Review on each VS Code release. |
 | VS Code extension host reloads on extension change in dev mode | MCP server is restarted; Claude Code must reconnect. Acceptable in dev; transparent in prod. |
 | localhost HTTP server accessible to any local process | Known limitation; acceptable for single-user developer machines. Document explicitly; defer auth to a follow-up. |
