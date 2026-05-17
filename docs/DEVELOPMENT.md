@@ -237,8 +237,8 @@ Close the example.org page.
 List all pages. Confirm only one pageId remains.
 ```
 
-**Expected:** One pageId in the list, response says "Page … closed."  
-**If failing:** If the browser tab was already closed externally (e.g. by switching focus during a permission dialog), `close_page` still succeeds and removes the entry from the session.
+**Expected:** One pageId in the list, response says "Page … removed from session."  
+**If failing:** If the browser tab was already closed externally (e.g. by switching focus during a permission dialog), `close_page` still succeeds and removes the entry from the session. If VS Code cannot close the tab programmatically, the response will include "(browser tab may still be visible)" but `isError` is not set.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
