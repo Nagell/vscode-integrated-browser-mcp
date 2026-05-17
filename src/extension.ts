@@ -18,8 +18,22 @@ export async function activate(context: vscode.ExtensionContext) {
             output.appendLine(`MCP server started on http://127.0.0.1:${port}/mcp`);
         } catch (err) {
             output.appendLine(`Failed to start MCP server: ${err}`);
+            // EADDRINUSE already shows a specific message from the server error handler.
+            if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+                vscode.window.showErrorMessage(`Integrated Browser MCP: failed to auto-start — ${(err as Error).message ?? String(err)}`);
+            }
         }
     }
+
+    // Lazily-created shared channel for all diagnostic commands below.
+    let debugOutput: vscode.OutputChannel | undefined;
+    const getDebugChannel = () => {
+        if (!debugOutput) {
+            debugOutput = vscode.window.createOutputChannel('Browser MCP Debug');
+            context.subscriptions.push(debugOutput);
+        }
+        return debugOutput;
+    };
 
     context.subscriptions.push(
         vscode.commands.registerCommand('integratedBrowserMcp.startServer', async () => {
@@ -44,9 +58,9 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        // Debug commands from U1 experiment — kept for diagnostic use
+        // Developer diagnostic commands: list registered LM tools, probe schemas, test invocations.
         vscode.commands.registerCommand('integratedBrowserMcp.listTools', () => {
-            const ch = vscode.window.createOutputChannel('Browser MCP Debug');
+            const ch = getDebugChannel();
             ch.appendLine('=== Registered LM Tools ===');
             ch.appendLine(vscode.lm.tools.map(t => t.name).join('\n'));
             ch.show();
@@ -54,7 +68,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         vscode.commands.registerCommand('integratedBrowserMcp.testInvoke', async () => {
             const cts = new vscode.CancellationTokenSource();
-            const ch = vscode.window.createOutputChannel('Browser MCP Debug');
+            const ch = getDebugChannel();
             try {
                 ch.appendLine('=== invoking open_browser_page ===');
                 const result = await vscode.lm.invokeTool('open_browser_page', {
@@ -71,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }),
 
         vscode.commands.registerCommand('integratedBrowserMcp.probeSchemas', () => {
-            const ch = vscode.window.createOutputChannel('Browser MCP Debug');
+            const ch = getDebugChannel();
             const browserTools = vscode.lm.tools.filter(t =>
                 ['open_browser_page', 'read_page', 'screenshot_page', 'navigate_page',
                  'click_element', 'type_in_page', 'hover_element', 'drag_element',
@@ -88,7 +102,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         vscode.commands.registerCommand('integratedBrowserMcp.testPageTools', async () => {
             const cts = new vscode.CancellationTokenSource();
-            const ch = vscode.window.createOutputChannel('Browser MCP Debug');
+            const ch = getDebugChannel();
             try {
                 ch.appendLine('=== 1. open_browser_page ===');
                 const openResult = await vscode.lm.invokeTool('open_browser_page', {
@@ -131,5 +145,7 @@ export async function activate(context: vscode.ExtensionContext) {
 export async function deactivate() {
     try {
         await server?.stop();
-    } catch { /* ignore */ }
+    } catch (err) {
+        output?.appendLine(`[deactivate] error stopping MCP server: ${err}`);
+    }
 }

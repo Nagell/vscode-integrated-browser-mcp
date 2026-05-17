@@ -7,15 +7,20 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as vscode from 'vscode';
 import { z } from 'zod';
+import type { McpContent } from './browserBridge.js';
 import * as bridge from './browserBridge.js';
 
 interface PageInfo { url?: string; openedAt: Date }
-type SessionEntry = { transport: StreamableHTTPServerTransport; server: McpServer; pages: Map<string, PageInfo> };
-
-type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+interface SessionEntry { transport: StreamableHTTPServerTransport; server: McpServer; pages: Map<string, PageInfo> }
 
 function errContent(err: unknown): { content: McpContent[]; isError: true } {
-    return { content: [{ type: 'text', text: `Error: ${err}` }], isError: true };
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
+}
+
+function getSessionId(req: http.IncomingMessage): string | undefined {
+    const raw = req.headers['mcp-session-id'];
+    return Array.isArray(raw) ? raw[0] : raw;
 }
 
 function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string, PageInfo>): McpServer {
@@ -58,9 +63,15 @@ function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string
         inputSchema: { pageId: z.string().describe('Page ID from open_browser_page') }
     }, async ({ pageId }) => {
         output.appendLine(`[tool] close_page pageId=${pageId}`);
-        await bridge.closePage(pageId).catch(err => output.appendLine(`[close_page] VS Code error (still removing): ${err}`));
+        let closeNote = '';
+        try {
+            await bridge.closePage(pageId);
+        } catch (err) {
+            output.appendLine(`[close_page] VS Code error closing tab: ${err}`);
+            closeNote = ' (browser tab may still be visible)';
+        }
         pages.delete(pageId);
-        return { content: [{ type: 'text', text: `Page ${pageId} closed.` }] as McpContent[] };
+        return { content: [{ type: 'text', text: `Page ${pageId} removed from session.${closeNote}` }] as McpContent[] };
     });
 
     server.registerTool('read_page', {
@@ -109,6 +120,8 @@ function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string
             if (newUrl) {
                 const info = pages.get(pageId);
                 if (info) { pages.set(pageId, { ...info, url: newUrl }); }
+            } else {
+                output.appendLine(`[navigate_page] could not extract URL from response for pageId=${pageId}`);
             }
             return { content };
         } catch (err) {
@@ -186,7 +199,7 @@ export class McpBridgeServer {
 
             app.post('/mcp', async (req, res) => {
                 try {
-                    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+                    const sessionId = getSessionId(req);
                     const existing = sessionId ? this._sessions.get(sessionId) : undefined;
 
                     if (existing) {
@@ -204,6 +217,7 @@ export class McpBridgeServer {
                     }
 
                     const pages = new Map<string, PageInfo>();
+                    const mcpServer = createMcpServerInstance(this._output, pages);
                     const transport = new StreamableHTTPServerTransport({
                         sessionIdGenerator: () => randomUUID(),
                         onsessioninitialized: (sid) => {
@@ -216,12 +230,12 @@ export class McpBridgeServer {
                         }
                     });
 
+                    // onsessionclosed handles clean MCP-level teardown; onclose is a fallback for abrupt transport drops.
                     transport.onclose = () => {
                         const sid = transport.sessionId;
                         if (sid) { this._sessions.delete(sid); }
                     };
 
-                    const mcpServer = createMcpServerInstance(this._output, pages);
                     await mcpServer.connect(transport);
                     await transport.handleRequest(req, res, req.body);
                 } catch (err) {
@@ -237,17 +251,22 @@ export class McpBridgeServer {
             });
 
             app.get('/mcp', async (req, res) => {
-                const sessionId = req.headers['mcp-session-id'] as string | undefined;
+                const sessionId = getSessionId(req);
                 const entry = sessionId ? this._sessions.get(sessionId) : undefined;
                 if (!entry) {
                     res.status(400).send('Invalid or missing session ID');
                     return;
                 }
-                await entry.transport.handleRequest(req, res);
+                try {
+                    await entry.transport.handleRequest(req, res);
+                } catch (err) {
+                    this._output.appendLine(`[error] GET /mcp: ${err}`);
+                    if (!res.headersSent) { res.status(500).send('Internal server error'); }
+                }
             });
 
             app.delete('/mcp', async (req, res) => {
-                const sessionId = req.headers['mcp-session-id'] as string | undefined;
+                const sessionId = getSessionId(req);
                 const entry = sessionId ? this._sessions.get(sessionId) : undefined;
                 if (!entry) {
                     res.status(400).send('Invalid or missing session ID');
@@ -266,12 +285,11 @@ export class McpBridgeServer {
 
             server.on('error', (err: NodeJS.ErrnoException) => {
                 if (err.code === 'EADDRINUSE') {
-                    const msg = `Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`;
-                    vscode.window.showErrorMessage(msg);
-                    reject(err);
+                    vscode.window.showErrorMessage(`Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`);
                 } else {
-                    reject(err);
+                    vscode.window.showErrorMessage(`Integrated Browser MCP: failed to start (${err.code ?? err.message}).`);
                 }
+                reject(err);
             });
 
             server.listen(port, '127.0.0.1', () => {
@@ -283,7 +301,7 @@ export class McpBridgeServer {
 
     async stop(): Promise<void> {
         for (const [sid, { transport }] of this._sessions) {
-            try { await transport.close(); } catch { /* ignore */ }
+            try { await transport.close(); } catch (err) { this._output.appendLine(`[stop] failed to close session ${sid}: ${err}`); }
             this._sessions.delete(sid);
         }
 
