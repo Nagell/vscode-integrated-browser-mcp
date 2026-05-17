@@ -2,7 +2,7 @@
   "name": "vscode-integrated-browser-mcp",
   "displayName": "Integrated Browser MCP",
   "description": "Exposes VS Code's Integrated Browser as an MCP server so external agents (Claude Code, etc.) can control it",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "Nagell",
   "icon": "assets/icon.png",
   "engines": {
@@ -87,6 +87,8 @@
   },
   "license": "MIT",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
