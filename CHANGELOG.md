@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.3...vscode-integrated-browser-mcp-v0.2.0) (2026-05-18)
+
+
+### Features
+
+* add workflow_dispatch trigger for manual publish ([60b67ed](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/60b67ed24bd4ceb03d389d883c78e43878b65e82))
+* add workflow_dispatch trigger for manual publish ([922433f](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/922433fc49494fb6d9cae455c83268ceb7196627))
+
 ## [0.1.3](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.2...vscode-integrated-browser-mcp-v0.1.3) (2026-05-18)
 
 
