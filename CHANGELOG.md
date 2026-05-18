@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.2...vscode-integrated-browser-mcp-v0.1.3) (2026-05-18)
+
+
+### Bug Fixes
+
+* rename displayName to avoid marketplace conflict ([7d89033](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/7d890335d6376b840c5afa39844068e07d9b13f0))
+* rename displayName to avoid marketplace conflict ([341ea1c](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/341ea1c1815f9d49c19b3371af07360e2201544b))
+
 ## [0.1.2](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.1...vscode-integrated-browser-mcp-v0.1.2) (2026-05-18)
 
 
