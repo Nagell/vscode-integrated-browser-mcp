@@ -6,6 +6,7 @@
 - [Development](#development)
   - [Documentation](#documentation)
   - [Architecture](#architecture)
+  - [Permission dialog scope](#permission-dialog-scope)
   - [Common commands](#common-commands)
   - [Project MCP config (.mcp.json)](#project-mcp-config-mcpjson)
   - [Running the extension](#running-the-extension)
@@ -59,6 +60,27 @@ MCP client (Claude Code, Cline, Continue.dev, …)
 ```
 
 Each connected MCP client session gets its own `StreamableHTTPServerTransport` instance and a `pages` map tracking open page IDs. Page IDs are assigned by VS Code and required by every browser tool call after `open_browser_page`.
+
+<p align="right">(<a href="#development-top">back to top</a>)</p>
+
+## Permission dialog scope
+
+VS Code shows a consent dialog the **first time** a non-chat extension calls `vscode.lm.invokeTool()` for a given tool in a session. Subsequent calls to the same tool within the same session run silently — VS Code caches the trust decision.
+
+**Confirmed behaviour (Phase 0 spike, VS Code 1.120):**
+
+- 6 tool calls → 6 initial dialogs (one per distinct tool, fired on first use)
+- After approving each tool once, the rest of the session is prompt-free
+- Applies to both `open_browser_page` (a dedicated VS Code LM tool) and `run_playwright_code` (used by Tier B/C/D/E tools)
+
+**No pre-authorization API exists** in VS Code 1.112–1.120 for non-chat extensions. There is no way to bulk-approve or suppress these dialogs programmatically.
+
+**Design consequence:** Tier B/C/D/E tools (eval_js, get_dom, scroll, emulate, markdown, console capture) all route through the single `run_playwright_code` LM tool. This means a user approves one dialog for that entire tier on first use, rather than one dialog per new capability.
+
+**What a user can do to reduce friction:**
+
+- Trust the extension publisher in VS Code's extension trust UI — this does not suppress the dialog but may reduce the number of re-prompts across sessions in future VS Code versions.
+- Accept all pending dialogs at session start by calling a Tier A and a Tier B tool once before the main workflow.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
