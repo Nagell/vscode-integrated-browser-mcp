@@ -38,6 +38,10 @@
       {
         "command": "integratedBrowserMcp.listTools",
         "title": "Integrated Browser MCP: List Available LM Tools (debug)"
+      },
+      {
+        "command": "integratedBrowserMcp.probeScreenshotSlice",
+        "title": "Integrated Browser MCP: Probe Screenshot Slice + Emulate (debug)"
       }
     ],
     "configuration": {
