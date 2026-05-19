@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as http from 'node:http';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from '../mcpServer.js';
+import { errContent } from '../util/mcpResult.js';
 
 const TEST_PORT = 3199;
 
@@ -61,6 +62,21 @@ function del(url: string, sessionId?: string): Promise<{ status: number; body: s
         req.end();
     });
 }
+
+suite('errContent', () => {
+    test('wraps an Error instance with isError: true', () => {
+        const result = errContent(new Error('boom'));
+        assert.strictEqual(result.isError, true);
+        assert.strictEqual(result.content[0].type, 'text');
+        assert.strictEqual(result.content[0].text, 'Error: boom');
+    });
+
+    test('wraps a string with isError: true', () => {
+        const result = errContent('string error');
+        assert.strictEqual(result.isError, true);
+        assert.strictEqual(result.content[0].text, 'Error: string error');
+    });
+});
 
 suite('McpBridgeServer', () => {
     let output: vscode.OutputChannel;

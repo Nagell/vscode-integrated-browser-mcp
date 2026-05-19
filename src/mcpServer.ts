@@ -7,16 +7,12 @@ import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as vscode from 'vscode';
 import { z } from 'zod';
-import type { McpContent } from './browserBridge.js';
 import * as bridge from './browserBridge.js';
+import type { PageInfo } from './tools/_context.js';
+import { errContent } from './util/mcpResult.js';
+import type { McpContent } from './util/mcpResult.js';
 
-interface PageInfo { url?: string; openedAt: Date }
 interface SessionEntry { transport: StreamableHTTPServerTransport; server: McpServer; pages: Map<string, PageInfo> }
-
-function errContent(err: unknown): { content: McpContent[]; isError: true } {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
-}
 
 function getSessionId(req: http.IncomingMessage): string | undefined {
     const raw = req.headers['mcp-session-id'];
