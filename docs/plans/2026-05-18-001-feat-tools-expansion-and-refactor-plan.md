@@ -450,6 +450,15 @@ work through `run_playwright_code` where possible.
   - If not, ensure new tools (Tiers B/C/D/E) all funnel through `run_playwright_code`
     to keep the consent prompt count to one per session.
 
+**Results (2026-05-19):** Probe run confirmed **per-call consent on first invocation**.
+6 dialogs for 6 calls (1 × `open_browser_page` + 5 × `run_playwright_code`). VS Code
+caches trust per tool within the session — subsequent calls to the same tool run without
+further prompts. No pre-authorization API exists in VS Code 1.112 for non-chat extensions;
+steps 1–3 of the investigation list (release notes, proposed API scan, `toolInvocationToken`
+source search) remain optional polish but are no longer blocking. **Workhorse routing
+confirmed**: Tiers B/C/D/E should all route through `run_playwright_code` so the user
+approves one tool once per session rather than N tools on first use.
+
 **Execution note:** This unit is investigation-led. The first step is reading
 release notes and the API surface, not writing code. Record findings in the
 DEVELOPMENT.md section regardless of outcome.
@@ -677,33 +686,36 @@ that design with the agent-driven tool model.
   `vscode.window.tabGroups` for editor-browser tabs and extracts their URLs.
 
 **Approach:**
-- **Gate experiment (~30 minutes, do this before implementing the tool):**
-  1. Open a tab externally (terminal link click on `http://localhost:8080`).
-  2. Read `vscode.window.tabGroups` and confirm that editor-browser tabs are
-     visible and that their `Tab.input` exposes the URL (likely via
-     `TabInputWebview` or a new tab-input type — verify exact shape).
-  3. From the extension, call `vscode.lm.invokeTool('open_browser_page',
-     { input: { url: 'http://localhost:8080' }, toolInvocationToken:
-     undefined }, ...)`. Observe: does VS Code (a) return the existing tab's
-     pageId, (b) open a fresh duplicate tab, or (c) raise an error? Behavior
-     dictates the tool's UX.
-- Tool behavior (assumes gate confirms VS Code reuses the tab):
+- **Gate experiment result (2026-05-19, discovered during U3 probe):**
+  Calling `open_browser_page` with a URL already open returns **behavior (a)**:
+  VS Code surfaces the existing tab's pageId without opening a duplicate. However
+  the response uses a different format than the happy-path `Page ID: <uuid>`:
+
+  ```text
+  At least one similar page is already open:
+  - [ff15fad8-a454-4fe8-9883-08f1b0463e38] JavaScript - Wikipedia (https://en.wikipedia.org/wiki/JavaScript) (active)
+  Use an existing page or pass `forceNew: true` to open a new one.
+  ```
+
+  The existing `extractPageId` regex `/Page ID:\s*(\S+)/` misses this format.
+  **Action required in this unit:** extend `extractPageId` to also match
+  `/\[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\]/` so
+  `openBrowserPage()` succeeds when the page is already open. Add a test case
+  for the "already open" response format to U6's test suite.
+  The `tabGroups` step (step 2 of the original gate) is still needed to confirm
+  the URL-enumeration path for `list_visible_pages` — that remains outstanding.
+- Tool behavior (gate confirmed VS Code reuses the tab):
   - `list_visible_pages` — returns `[{ url, isActive, viewColumn }]` for every
     editor-browser tab VS Code knows about, including ones we never opened.
     Strictly read-only.
   - `attach_visible_page` — schema: `{ url?: string }`. Resolves the target URL
     (explicit argument, or active editor-browser tab if omitted), calls
     `vscode.lm.invokeTool('open_browser_page', { url, forceNew: false })`,
-    extracts the pageId from the result, stores it in the session `pages` map,
-    returns the pageId. The agent then drives the page with the existing tool
-    surface (click, type, screenshot) unchanged.
-- If the gate shows VS Code opens a fresh duplicate tab instead of reusing,
-  the tool still works but the user-visible behavior is "user clicks link,
-  agent attaches, a second identical tab appears". Document this as a
-  limitation in the tool description; do not block on it.
-- If the gate shows `open_browser_page` raises an error when the target tab
-  already exists, escalate — U6 may need a different mechanism (e.g., calling
-  a different VS Code command first to close the external tab).
+    extracts the pageId from the updated `extractPageId` (handles both formats),
+    stores it in the session `pages` map, returns the pageId. The agent then
+    drives the page with the existing tool surface (click, type, screenshot)
+    unchanged.
+- No duplicate tab risk — VS Code's own dedup logic handles this (confirmed).
 
 **Patterns to follow:**
 - Existing `open_browser_page` registration in `src/tools/page.ts` (post-U2).
@@ -1587,6 +1599,7 @@ registry interacts with the Claude Code config decision)
 ## Phased Delivery
 
 ### Phase 0 — Pre-flight spikes (~1–2 days total)
+
 - U3 step 4 (consent-prompt experiment) — gates the architectural bet that
   shapes Tier B/C/D/E routing.
 - U16 scaffolding spike — stand up `.github/workflows/test.yml` running the
@@ -1597,6 +1610,20 @@ Both spikes are independent and can run in parallel. Results are recorded in
 `docs/DEVELOPMENT.md`. If the consent spike disproves the workhorse bet,
 U2's file structure is adjusted before Phase 1 starts. If the CI spike fails,
 U16 falls back to local-only release-gate per its Approach.
+
+**Results (2026-05-19):**
+
+U3 consent experiment — **complete.** 6 dialogs for 6 calls (1 × `open_browser_page`,
+5 × `run_playwright_code`). Per-call consent on first invocation; trust caches per
+tool for the session. Workhorse routing confirmed. See U3 Approach for full findings.
+
+U6 gate (discovered during U3 probe) — **partially complete.** `open_browser_page`
+called on an already-open URL returns the existing tab's pageId (behavior a, no
+duplicate). Response format is `[pageId] Title (URL) (active)` — different from
+the happy-path `Page ID: <uuid>`. `extractPageId` must be extended in U6.
+`tabGroups` enumeration for `list_visible_pages` still needs a manual check.
+
+U16 CI scaffolding spike — **not yet run.**
 
 ### Phase 1 — Structural foundation
 - U1 (helpers extracted)
