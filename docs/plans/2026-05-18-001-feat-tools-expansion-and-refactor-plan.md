@@ -1187,17 +1187,22 @@ tool unit (U7 for Tier A, U8 for Tier B, etc.).
   documenting the xvfb setup and how to debug failures locally.
 
 **Approach:**
-- **Pre-flight spike (~1 hour, blocking).** Stand up the workflow with just
-  `xvfb-run pnpm test` and the existing 17 unit tests. Push to a branch. If
-  CI passes: scaffolding works. Add a second job that opens the Integrated
-  Browser panel programmatically and verifies `vscode.lm.tools.find(t =>
-  t.name === 'open_browser_page')` returns truthy. If that works: integration
-  tests are viable. If not: fall back to local-only release-gate (and revisit
-  Finding 6 with a less ambitious shape).
-- **Test setup hook** (shared across integration tests): a `before()` block
-  that enables `workbench.browser.enableChatTools` in the test workspace
-  settings and runs `vscode.commands.executeCommand` to open the browser
-  panel. Document any incantations needed in `docs/DEVELOPMENT.md`.
+
+- **Pre-flight spike — complete (2026-05-19).** `.github/workflows/test.yml`
+  ships; 17 unit tests pass in CI under `xvfb-run -a pnpm test`.
+  `src/test/integration/lm-tool-availability.test.ts` verifies that
+  `open_browser_page` appears in `vscode.lm.tools` in the headless extension
+  host (18th test, green). Setup: `workbench.browser.enableChatTools: true`
+  pre-configured in `src/test/workspace/.vscode/settings.json`; test runner
+  pointed at that workspace via `.vscode-test.mjs` `workspaceFolder` option.
+  **Integration tests are viable in CI.** Outstanding: whether `invokeTool` can
+  open a real browser tab without a workbench renderer — to be answered by the
+  Phase 4 per-Tier test runs.
+- **Test setup hook** (shared across per-Tier integration tests): `suiteSetup`
+  waits 3 s for VS Code to finish registering tools; no programmatic setting
+  write needed (pre-set in workspace). `vscode.commands.executeCommand` to open
+  the browser panel may still be needed for tests that call `invokeTool` — add
+  if the Phase 4 spike shows it's required.
 - **Test shape:** each integration test instantiates an `McpBridgeServer` on
   port 3199 (matches existing tests), connects as an HTTP MCP client (the
   existing test file already does this), calls one tool, asserts the
@@ -1588,8 +1593,9 @@ registry interacts with the Claude Code config decision)
   a page` row if U3 lands a fix.
 - `README.md` may need an updated tool list when the work completes — defer
   until the final release packaging; not a per-unit step.
-- No CI changes required; the existing `pretest` lint+compile pipeline catches
-  everything the test suite needs.
+- CI: `.github/workflows/test.yml` added in Phase 0 — runs `xvfb-run -a pnpm test`
+  on every push and PR. Per-Tier integration test files accrue alongside each
+  tool unit in Phase 4.
 - Releases: keep the probe command available until U13 lands, but ensure U13 is
   merged before the next `release-please` cuts a release. Verify via
   `package.json` diff in the release PR.
@@ -1623,9 +1629,18 @@ duplicate). Response format is `[pageId] Title (URL) (active)` — different fro
 the happy-path `Page ID: <uuid>`. `extractPageId` must be extended in U6.
 `tabGroups` enumeration for `list_visible_pages` still needs a manual check.
 
-U16 CI scaffolding spike — **not yet run.**
+U16 CI scaffolding spike — **complete (2026-05-19).** `.github/workflows/test.yml`
+ships; `xvfb-run -a pnpm test` runs clean on every push. 18/18 tests pass,
+including the LM tool availability spike (`open_browser_page` registers in the
+headless extension host with `workbench.browser.enableChatTools: true`). Per-Tier
+integration tests are viable in CI. The open question — whether `invokeTool` can
+open a real browser tab in a renderer-less environment — is deferred to Phase 4
+when the tool units land.
 
-### Phase 1 — Structural foundation
+---
+
+### ▶ NEXT: Phase 1 — Structural foundation
+
 - U1 (helpers extracted)
 - U2 (split into `src/tools/`)
 
