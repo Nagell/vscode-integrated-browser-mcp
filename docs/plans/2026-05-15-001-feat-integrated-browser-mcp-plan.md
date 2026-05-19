@@ -1,10 +1,29 @@
 ---
 title: "feat: VS Code Integrated Browser MCP Extension"
 type: feat
-status: in-progress
+status: complete
 date: 2026-05-15
+completed: 2026-05-17
+superseded_by: docs/plans/2026-05-18-001-feat-tools-expansion-and-refactor-plan.md
 origin: docs/plans/2026-05-15-vscode-integrated-browser-mcp-implementation.md
 ---
+
+> **Status note (2026-05-18):** v1 scope (U1–U6) is shipped — extension is
+> published at v0.2.0 with all 8 v1 tools, the HTTP MCP server, error handling,
+> output channel, README, and the manual test runbook in
+> [docs/DEVELOPMENT.md](../DEVELOPMENT.md). U4 (CDP path) was skipped because U1
+> confirmed Path A is viable. The remaining items below — U7 (auto-configure
+> Claude Code), U8 (element selection push), and the "Deferred to Follow-Up
+> Work" entries (Tier A tools, multi-window support) — are now picked up in
+> [docs/plans/2026-05-18-001-feat-tools-expansion-and-refactor-plan.md](2026-05-18-001-feat-tools-expansion-and-refactor-plan.md):
+>
+> - prior U7 → new plan **U5** (auto-register MCP entry in Claude Code config)
+> - prior U8 → new plan **U14** (element selection — push picked element via SSE)
+> - prior deferred Tier A → new plan **U7** (hover_element, drag_element, handle_dialog)
+> - prior deferred multi-window → new plan **U15** (multi-window support)
+>
+> `runPlaywrightCode` exposed as an MCP tool stays deferred indefinitely — the
+> new plan uses it as an internal workhorse only.
 
 # feat: VS Code Integrated Browser MCP Extension
 
@@ -388,26 +407,27 @@ docs/
 
 ## Implementation Units
 
-### Progress snapshot — 2026-05-17
+### Progress snapshot — 2026-05-18
 
 | Unit | Title | Status |
 | --- | --- | --- |
-| U1 | Probe invokeTool viability | ✅ Complete |
-| U2 | MCP server (stateful HTTP transport) | ✅ Complete |
-| U3 | Path A bridge — invokeTool proxy | ✅ Complete |
+| U1 | Probe invokeTool viability | ✅ Complete (2026-05-15) |
+| U2 | MCP server (stateful HTTP transport) | ✅ Complete (2026-05-17) |
+| U3 | Path A bridge — invokeTool proxy | ✅ Complete (2026-05-17) |
 | U4 | Path B bridge — Playwright CDP | ⏭ Skipped (U1 confirmed Path A viable) |
-| U5 | Error handling, output channel, resilience | ✅ Complete (merged into U2/U3) |
-| U6 | Client configuration and documentation | ✅ Complete |
-| U7 | Auto-configure Claude Code on first activation | 📋 Planned (post-v1) |
-| U8 | Element selection — intercept or custom toolbar button | 📋 Planned (post-v1) |
+| U5 | Error handling, output channel, resilience | ✅ Complete (merged into U2/U3, 2026-05-17) |
+| U6 | Client configuration and documentation | ✅ Complete (2026-05-17) |
+| U7 | Auto-configure Claude Code on first activation | ➡️ Moved to [2026-05-18 plan U5](2026-05-18-001-feat-tools-expansion-and-refactor-plan.md) |
+| U8 | Element selection — intercept or custom toolbar button | ➡️ Moved to [2026-05-18 plan U14](2026-05-18-001-feat-tools-expansion-and-refactor-plan.md) |
 
 **Integration test — PASSED (2026-05-17):** Claude Code called `open_browser_page` → got a real
 `pageId` back → called `screenshot_page` → received a 1100×1271 JPEG of example.com. Full
 end-to-end round-trip confirmed. 17 unit tests pass (expanded from 11 in code review pass, 2026-05-17).
 
-**Stopped at:** v1 core complete. Remaining work is post-v1 polish: U7 (auto-configure
-`~/.claude.json`) and U8 (element selection push). README and docs (U6 deliverables) still to be
-written, but functionality is confirmed working.
+**Closeout (2026-05-18):** v1 core shipped and published as v0.2.0. The two
+remaining units (U7, U8) are now tracked in the 2026-05-18 plan along with
+additional tools (Tiers A–E), refactor, page adoption, permission-UX
+investigation, and multi-window support.
 
 ---
 
@@ -680,7 +700,7 @@ README explains the configuration step.
 
 ---
 
-- U7. **Auto-configure Claude Code on first activation** *(post-v1 polish)*
+- U7. **Auto-configure Claude Code on first activation** ➡️ MOVED to [2026-05-18 plan U5](2026-05-18-001-feat-tools-expansion-and-refactor-plan.md)
 
 **Goal:** On first activation, detect whether Claude Code is already configured to use this
 extension's MCP server. If not, show a VS Code notification offering to add the config
@@ -738,7 +758,7 @@ automatically — one click, works everywhere, no manual JSON editing required.
 
 ---
 
-- U8. **Element selection — intercept or custom toolbar button** 📋 PLANNED (post-v1)
+- U8. **Element selection — intercept or custom toolbar button** ➡️ MOVED to [2026-05-18 plan U14](2026-05-18-001-feat-tools-expansion-and-refactor-plan.md)
 
 **Goal:** When the user clicks an element in the Integrated Browser, Claude Code receives that
 element's data (screenshot, computed styles, position, inner text) as context automatically —
