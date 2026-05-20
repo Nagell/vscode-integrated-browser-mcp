@@ -9,6 +9,9 @@ const BROWSER_TOOLS = {
     navigatePage: 'navigate_page',
     clickElement: 'click_element',
     typeInPage: 'type_in_page',
+    hoverElement: 'hover_element',
+    dragElement: 'drag_element',
+    handleDialog: 'handle_dialog',
     // No dedicated close_page LM tool exists; run_playwright_code is the only way to programmatically close a tab.
     runPlaywrightCode: 'run_playwright_code',
 } as const;
@@ -120,6 +123,39 @@ export async function closePage(pageId: string): Promise<McpContent[]> {
     return resultToMcp(result);
 }
 
+export async function hoverElement(pageId: string, element: string, ref?: string, selector?: string): Promise<McpContent[]> {
+    const input: Record<string, unknown> = { pageId, element };
+    if (ref) { input.ref = ref; }
+    if (selector) { input.selector = selector; }
+    const result = await invoke(BROWSER_TOOLS.hoverElement, input);
+    return resultToMcp(result);
+}
+
+export async function dragElement(
+    pageId: string,
+    sourceElement: string,
+    targetElement: string,
+    sourceRef?: string,
+    targetRef?: string,
+    sourceSelector?: string,
+    targetSelector?: string
+): Promise<McpContent[]> {
+    const input: Record<string, unknown> = { pageId, sourceElement, targetElement };
+    if (sourceRef) { input.sourceRef = sourceRef; }
+    if (targetRef) { input.targetRef = targetRef; }
+    if (sourceSelector) { input.sourceSelector = sourceSelector; }
+    if (targetSelector) { input.targetSelector = targetSelector; }
+    const result = await invoke(BROWSER_TOOLS.dragElement, input);
+    return resultToMcp(result);
+}
+
+export async function handleDialog(pageId: string, action: 'accept' | 'dismiss', text?: string): Promise<McpContent[]> {
+    const input: Record<string, unknown> = { pageId, action };
+    if (text !== undefined) { input.text = text; }
+    const result = await invoke(BROWSER_TOOLS.handleDialog, input);
+    return resultToMcp(result);
+}
+
 export async function typeInPage(pageId: string, text?: string, key?: string, ref?: string, selector?: string, element?: string): Promise<McpContent[]> {
     const input: Record<string, unknown> = { pageId };
     if (text) { input.text = text; }
@@ -163,4 +199,26 @@ export function decodeBuffer(raw: string): Uint8Array {
 export async function runPlaywrightCode(pageId: string, code: string): Promise<string | undefined> {
     const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code });
     return extractRpcResult(result);
+}
+
+export async function evalJs(pageId: string, expression: string): Promise<string | undefined> {
+    const code = `const fn = new Function('return (' + ${JSON.stringify(expression)} + ');'); return JSON.stringify(await page.evaluate(fn));`;
+    return runPlaywrightCode(pageId, code);
+}
+
+export async function getDom(pageId: string, selector?: string): Promise<string | undefined> {
+    const code = `return await page.evaluate(sel => sel ? document.querySelector(sel)?.outerHTML ?? '' : document.documentElement.outerHTML, ${JSON.stringify(selector ?? null)});`;
+    return runPlaywrightCode(pageId, code);
+}
+
+export async function scrollPage(pageId: string, deltaX?: number, deltaY?: number, x?: number, y?: number): Promise<void> {
+    const code = x !== undefined && y !== undefined
+        ? `window.scrollTo(${Number(x)}, ${Number(y)});`
+        : `window.scrollBy(${Number(deltaX ?? 0)}, ${Number(deltaY ?? 0)});`;
+    await runPlaywrightCode(pageId, code);
+}
+
+export async function emulate(pageId: string, width: number, height: number): Promise<void> {
+    const code = `await page.setViewportSize({ width: ${Number(width)}, height: ${Number(height)} });`;
+    await runPlaywrightCode(pageId, code);
 }

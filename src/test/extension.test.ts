@@ -284,18 +284,19 @@ suite('McpBridgeServer', () => {
             assert.ok(res.status >= 200 && res.status < 300, `expected 2xx, got ${res.status}: ${res.body}`);
         });
 
-        test('tools/list returns all 10 expected tools', async () => {
+        test('tools/list returns all 18 expected tools', async () => {
             const res = await rpc('tools/list', {}, 2);
             assert.strictEqual(res.status, 200);
             const payload = parseResult(res.body) as { result: { tools: { name: string }[] } };
             const names = payload.result.tools.map(t => t.name);
             const expected = [
-                'open_browser_page', 'list_pages', 'close_page',
-                'read_page', 'screenshot_page', 'navigate_page',
-                'click_element', 'type_in_page',
-                'list_visible_pages', 'attach_visible_page'
+                'open_browser_page', 'list_pages', 'close_page', 'navigate_page',
+                'list_visible_pages', 'attach_visible_page', 'get_url',
+                'screenshot_page', 'emulate',
+                'read_page', 'eval_js', 'get_dom',
+                'click_element', 'type_in_page', 'hover_element', 'drag_element', 'handle_dialog', 'scroll'
             ];
-            assert.strictEqual(names.length, 10, `expected 10 tools, got: ${names.join(', ')}`);
+            assert.strictEqual(names.length, 18, `expected 18 tools, got: ${names.join(', ')}`);
             for (const name of expected) {
                 assert.ok(names.includes(name), `expected tool "${name}" in list, got: ${names.join(', ')}`);
             }

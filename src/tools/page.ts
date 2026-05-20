@@ -102,6 +102,16 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
         return { content: [{ type: 'text', text: lines.join('\n') }] as McpContent[] };
     });
 
+    server.registerTool('get_url', {
+        description: 'Get the URL of an open browser page. Returns the URL at the time the page was opened or last navigated; may be stale after in-page navigation.',
+        inputSchema: { pageId: pageIdSchema }
+    }, ({ pageId }) => {
+        output.appendLine(`[tool] get_url pageId=${pageId}`);
+        const info = pages.get(pageId);
+        const url = info?.url ?? '(unknown url)';
+        return { content: [{ type: 'text', text: url }] as McpContent[] };
+    });
+
     server.registerTool('attach_visible_page', {
         description: 'Attach to a browser tab already open in VS Code — including tabs opened externally via terminal links ' +
             'or Simple Browser — so you can use click, screenshot and other tools on it. ' +

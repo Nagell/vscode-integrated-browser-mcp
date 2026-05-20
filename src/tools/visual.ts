@@ -1,7 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import * as bridge from '../browserBridge.js';
 import type { McpContent } from '../util/mcpResult.js';
-import { errContent } from '../util/mcpResult.js';
+import { errContent, parseContractGuard } from '../util/mcpResult.js';
 import { pageIdSchema, refSchema, selectorSchema } from './_schemas.js';
 import type { ToolContext } from './_context.js';
 
@@ -21,6 +22,26 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
             return { content: await bridge.screenshotPage(pageId, ref, selector) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] screenshot_page: ${err}`);
+            return errContent(err);
+        }
+    });
+
+    server.registerTool('emulate', {
+        description: 'Set the browser viewport size. Affects screenshot output and CSS layout (responsive breakpoints), not the visible panel size.',
+        inputSchema: {
+            pageId: pageIdSchema,
+            width: z.number().int().positive().max(8192).describe('Viewport width in pixels'),
+            height: z.number().int().positive().max(8192).describe('Viewport height in pixels')
+        }
+    }, async ({ pageId, width, height }) => {
+        output.appendLine(`[tool] emulate pageId=${pageId} ${width}x${height}`);
+        const guard = parseContractGuard(ctx.parseContract.status, ctx.parseContract.details);
+        if (guard) { return guard; }
+        try {
+            await bridge.emulate(pageId, width, height);
+            return { content: [{ type: 'text', text: `Viewport set to ${width}x${height}.` }] as McpContent[] };
+        } catch (err) {
+            output.appendLine(`[error] emulate: ${err}`);
             return errContent(err);
         }
     });

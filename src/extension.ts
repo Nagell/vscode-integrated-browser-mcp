@@ -24,7 +24,7 @@ function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
                 'Open Issue'
             ).then(choice => {
                 if (choice === 'Open Issue') {
-                    void vscode.env.openExternal(vscode.Uri.parse('https://github.com/itsbrex/vscode-integrated-browser-mcp/issues'));
+                    void vscode.env.openExternal(vscode.Uri.parse('https://github.com/Nagell/vscode-integrated-browser-mcp/issues'));
                 }
             });
         }

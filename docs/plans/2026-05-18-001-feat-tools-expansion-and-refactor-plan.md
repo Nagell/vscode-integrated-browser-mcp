@@ -1654,11 +1654,15 @@ when the tool units land.
 - U5 — `src/install/claudeConfig.ts`: symlink-safe, atomic write, globalState-gated auto-register; 9 new merge/idempotency tests
 - U6 — `list_visible_pages` + `attach_visible_page` in `src/tools/page.ts`; `extractPageId` extended for "already open" UUID format; `enumerateVisibleBrowserTabs()` via `tabGroups`
 
-### ▶ NEXT: Phase 4 — Tools (fans out)
+### ~~Phase 4 — Tools (fans out)~~ — partial (2026-05-20)
 
-- U7 (Tier A) — independent
-- U8 (Tier B) — depends on U4
-- U9 (screenshot_page additions) — depends on U4, U8
+- U7 — `hover_element`, `drag_element`, `handle_dialog` in `src/tools/interaction.ts`; `hoverElement`, `dragElement`, `handleDialog` wrappers in `browserBridge.ts`
+- U8 — `eval_js`, `get_dom` in `src/tools/content.ts`; `scroll` in `src/tools/interaction.ts`; `emulate` in `src/tools/visual.ts`; `get_url` in `src/tools/page.ts`; `parseContractGuard` helper in `src/util/mcpResult.ts`; 18 tools total
+- U9, U10, U11, U12, U16 — pending
+
+### ▶ NEXT: Phase 4 (continued) — U9, U10, U11, U12, U16
+
+- U9 (screenshot_page additions: fullPage, waitMs) — depends on U4, U8
 - U10 (screenshot_slice) — depends on U4, U8, U9
 - U11 (markdown) — depends on U4
 - U12 (console capture) — depends on U4
