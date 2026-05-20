@@ -39,12 +39,34 @@ function resultToMcp(result: vscode.LanguageModelToolResult): McpContent[] {
 
 function extractPageId(result: vscode.LanguageModelToolResult): string | undefined {
     for (const part of result.content) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-            const match = part.value.match(/Page ID:\s*(\S+)/);
-            if (match) { return match[1]; }
-        }
+        if (!(part instanceof vscode.LanguageModelTextPart)) { continue; }
+        // Happy-path format: "Page ID: <uuid>"
+        const explicit = part.value.match(/Page ID:\s*(\S+)/);
+        if (explicit) { return explicit[1]; }
+        // "Already open" format from gate experiment:
+        // "[ff15fad8-...] Title (URL) (active)"
+        const existing = part.value.match(/\[([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\]/);
+        if (existing) { return existing[1]; }
     }
     return undefined;
+}
+
+export interface VisibleBrowserTab {
+    label: string;
+    isActive: boolean;
+    viewColumn?: number;
+}
+
+export function enumerateVisibleBrowserTabs(): VisibleBrowserTab[] {
+    const tabs: VisibleBrowserTab[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+            if (tab.input instanceof vscode.TabInputWebview && tab.input.viewType === 'simpleBrowser.view') {
+                tabs.push({ label: tab.label, isActive: tab.isActive, viewColumn: group.viewColumn });
+            }
+        }
+    }
+    return tabs;
 }
 
 export interface OpenPageResult {

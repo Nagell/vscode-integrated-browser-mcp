@@ -5,6 +5,7 @@ import type { McpContent } from '../util/mcpResult.js';
 import { errContent } from '../util/mcpResult.js';
 import { pageIdSchema } from './_schemas.js';
 import type { ToolContext } from './_context.js';
+import type { VisibleBrowserTab } from '../browserBridge.js';
 
 export function registerPageTools(server: McpServer, ctx: ToolContext): void {
     const { output, pages } = ctx;
@@ -79,6 +80,43 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
             return { content };
         } catch (err) {
             output.appendLine(`[error] navigate_page: ${err}`);
+            return errContent(err);
+        }
+    });
+
+    server.registerTool('list_visible_pages', {
+        description: 'List all Simple Browser tabs currently open in VS Code, including ones not opened by this session. ' +
+            'Useful before calling attach_visible_page to confirm which tabs are available.',
+        inputSchema: {}
+    }, () => {
+        output.appendLine('[tool] list_visible_pages');
+        const tabs: VisibleBrowserTab[] = bridge.enumerateVisibleBrowserTabs();
+        if (tabs.length === 0) {
+            return { content: [{ type: 'text', text: '(no browser tabs visible)' }] as McpContent[] };
+        }
+        const lines = tabs.map(t => {
+            const active = t.isActive ? ' (active)' : '';
+            const col = t.viewColumn !== undefined ? ` [col ${t.viewColumn}]` : '';
+            return `${t.label}${active}${col}`;
+        });
+        return { content: [{ type: 'text', text: lines.join('\n') }] as McpContent[] };
+    });
+
+    server.registerTool('attach_visible_page', {
+        description: 'Attach to a browser tab already open in VS Code — including tabs opened externally via terminal links ' +
+            'or Simple Browser — so you can use click, screenshot and other tools on it. ' +
+            'Pass the tab\'s URL; if the tab is already open VS Code reuses it without opening a duplicate.',
+        inputSchema: {
+            url: z.string().describe('URL of the tab to attach to (check list_visible_pages for open tabs)')
+        }
+    }, async ({ url }) => {
+        output.appendLine(`[tool] attach_visible_page url=${url}`);
+        try {
+            const { pageId, content } = await bridge.openBrowserPage(url, false);
+            pages.set(pageId, { url, openedAt: new Date() });
+            return { content: [{ type: 'text', text: `pageId: ${pageId}` }, ...content] as McpContent[] };
+        } catch (err) {
+            output.appendLine(`[error] attach_visible_page: ${err}`);
             return errContent(err);
         }
     });
