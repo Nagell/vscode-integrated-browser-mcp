@@ -1,8 +1,37 @@
 import * as vscode from 'vscode';
 import { McpBridgeServer } from './mcpServer.js';
+import * as bridge from './browserBridge.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
+
+// Fire-and-forget: verifies the run_playwright_code response shape hasn't changed.
+// At activation time there is usually no open page, so 'unverified' is the common outcome.
+function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
+    bridge.runPlaywrightCode('', 'return 42;').then(value => {
+        if (value === '42') {
+            s.parseContract.status = 'ok';
+            out.appendLine('[startup] parse probe: ok');
+        } else if (value !== undefined) {
+            s.parseContract.status = 'diverged';
+            s.parseContract.details = `Expected "42", got: ${value.slice(0, 100)}`;
+            out.appendLine(`[startup] parse probe: DIVERGED — ${s.parseContract.details}`);
+            vscode.window.showErrorMessage(
+                'Integrated Browser MCP: VS Code response format may have changed. ' +
+                'Tools relying on run_playwright_code will return errors. ' +
+                'Please update the extension or report the issue.',
+                'Open Issue'
+            ).then(choice => {
+                if (choice === 'Open Issue') {
+                    void vscode.env.openExternal(vscode.Uri.parse('https://github.com/itsbrex/vscode-integrated-browser-mcp/issues'));
+                }
+            });
+        }
+        // value === undefined: no Result: line — no open page, stay 'unverified'
+    }).catch(() => {
+        out.appendLine('[startup] parse probe skipped (no browser page ready)');
+    });
+}
 
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
@@ -16,6 +45,7 @@ export async function activate(context: vscode.ExtensionContext) {
         try {
             await server.start(port);
             output.appendLine(`MCP server started on http://127.0.0.1:${port}/mcp`);
+            runParseProbe(server, output);
         } catch (err) {
             output.appendLine(`Failed to start MCP server: ${err}`);
             // EADDRINUSE already shows a specific message from the server error handler.

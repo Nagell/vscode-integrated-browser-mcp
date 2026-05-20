@@ -3,6 +3,7 @@ import * as http from 'node:http';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from '../mcpServer.js';
 import { errContent } from '../util/mcpResult.js';
+import { extractRpcResult, decodeBuffer } from '../browserBridge.js';
 
 const TEST_PORT = 3199;
 
@@ -62,6 +63,46 @@ function del(url: string, sessionId?: string): Promise<{ status: number; body: s
         req.end();
     });
 }
+
+function textResult(...texts: string[]): vscode.LanguageModelToolResult {
+    return new vscode.LanguageModelToolResult(texts.map(t => new vscode.LanguageModelTextPart(t)));
+}
+
+suite('extractRpcResult', () => {
+    test('extracts Result: value from a single text part', () => {
+        const result = extractRpcResult(textResult('Result: foo\nPage Title: x'));
+        assert.strictEqual(result, 'foo');
+    });
+
+    test('unwraps one level of JSON string quoting', () => {
+        const result = extractRpcResult(textResult('Result: "{\\"a\\":1}"'));
+        assert.strictEqual(result, '{"a":1}');
+    });
+
+    test('returns undefined for empty parts array', () => {
+        assert.strictEqual(extractRpcResult(new vscode.LanguageModelToolResult([])), undefined);
+    });
+
+    test('returns undefined when no Result: prefix', () => {
+        assert.strictEqual(extractRpcResult(textResult('Page Title: x\nSome content')), undefined);
+    });
+});
+
+suite('decodeBuffer', () => {
+    test('decodes {"type":"Buffer","data":[...]} shape', () => {
+        const buf = decodeBuffer('{"type":"Buffer","data":[255,216,1,2]}');
+        assert.deepStrictEqual(Array.from(buf), [255, 216, 1, 2]);
+    });
+
+    test('decodes bare number array', () => {
+        const buf = decodeBuffer('[255,216,1,2]');
+        assert.deepStrictEqual(Array.from(buf), [255, 216, 1, 2]);
+    });
+
+    test('throws on invalid JSON with Buffer in message', () => {
+        assert.throws(() => decodeBuffer('not json'), /Buffer/);
+    });
+});
 
 suite('errContent', () => {
     test('wraps an Error instance with isError: true', () => {

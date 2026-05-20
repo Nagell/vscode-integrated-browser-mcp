@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as vscode from 'vscode';
-import type { PageInfo } from './tools/_context.js';
+import type { PageInfo, ParseContract } from './tools/_context.js';
 import { registerPageTools } from './tools/page.js';
 import { registerInteractionTools } from './tools/interaction.js';
 import { registerVisualTools } from './tools/visual.js';
@@ -20,9 +20,9 @@ function getSessionId(req: http.IncomingMessage): string | undefined {
     return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string, PageInfo>): McpServer {
+function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string, PageInfo>, parseContract: ParseContract): McpServer {
     const server = new McpServer({ name: 'integrated-browser-mcp', version: '0.0.1' });
-    const ctx = { output, pages };
+    const ctx = { output, pages, parseContract };
 
     registerPageTools(server, ctx);
     registerInteractionTools(server, ctx);
@@ -37,6 +37,7 @@ export class McpBridgeServer {
     private _httpServer: http.Server | undefined;
     private _sessions = new Map<string, SessionEntry>();
     private _output: vscode.OutputChannel;
+    readonly parseContract: ParseContract = { status: 'unverified' };
 
     constructor(output: vscode.OutputChannel) {
         this._output = output;
@@ -79,7 +80,7 @@ export class McpBridgeServer {
                     }
 
                     const pages = new Map<string, PageInfo>();
-                    const mcpServer = createMcpServerInstance(this._output, pages);
+                    const mcpServer = createMcpServerInstance(this._output, pages, this.parseContract);
                     const transport = new StreamableHTTPServerTransport({
                         sessionIdGenerator: () => randomUUID(),
                         onsessioninitialized: (sid) => {

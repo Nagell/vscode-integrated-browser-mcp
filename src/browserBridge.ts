@@ -108,3 +108,37 @@ export async function typeInPage(pageId: string, text?: string, key?: string, re
     const result = await invoke(BROWSER_TOOLS.typeInPage, input);
     return resultToMcp(result);
 }
+
+// Extracts the `Result:` value from a run_playwright_code response, unwrapping one level
+// of JSON string quoting when present (VS Code double-encodes string return values).
+export function extractRpcResult(result: vscode.LanguageModelToolResult): string | undefined {
+    for (const part of result.content) {
+        if (!(part instanceof vscode.LanguageModelTextPart)) { continue; }
+        const m = part.value.match(/^Result:\s*([\s\S]+?)(?:\nPage Title:|$)/);
+        if (!m) { continue; }
+        const raw = m[1].trim();
+        if (raw.startsWith('"') && raw.endsWith('"')) {
+            try { return JSON.parse(raw) as string; } catch { /* fall through */ }
+        }
+        return raw;
+    }
+    return undefined;
+}
+
+// Decodes a run_playwright_code Buffer return value to a Uint8Array.
+// Accepts both `{"type":"Buffer","data":[...]}` and bare number-array JSON.
+export function decodeBuffer(raw: string): Uint8Array {
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch {
+        throw new Error(`decodeBuffer: failed to parse Buffer JSON: ${raw.slice(0, 100)}`);
+    }
+    const arr = Array.isArray(parsed)
+        ? (parsed as number[])
+        : ((parsed as { type: string; data: number[] }).data);
+    return new Uint8Array(arr);
+}
+
+export async function runPlaywrightCode(pageId: string, code: string): Promise<string | undefined> {
+    const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code });
+    return extractRpcResult(result);
+}
