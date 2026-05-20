@@ -1649,16 +1649,13 @@ when the tool units land.
 - U3 — `docs/DEVELOPMENT.md` permission dialog scope documented
 - U4 — `extractRpcResult`, `decodeBuffer`, `runPlaywrightCode` in `browserBridge.ts`; startup parse probe in `extension.ts`; `parseContract` on `McpBridgeServer`
 
-### ▶ NEXT: Phase 3 — Features
+### ~~Phase 3 — Features~~ — complete (2026-05-20)
 
-- U5 (auto-register)
-- U6 (page adoption)
+- U5 — `src/install/claudeConfig.ts`: symlink-safe, atomic write, globalState-gated auto-register; 9 new merge/idempotency tests
+- U6 — `list_visible_pages` + `attach_visible_page` in `src/tools/page.ts`; `extractPageId` extended for "already open" UUID format; `enumerateVisibleBrowserTabs()` via `tabGroups`
 
-Both depend only on Phase 1. They are independent of each other and the tool
-expansion. (U5 is extended in Phase 5 for multi-window support, but the base
-auto-register feature is complete in this phase.)
+### ▶ NEXT: Phase 4 — Tools (fans out)
 
-### Phase 4 — Tools (fans out)
 - U7 (Tier A) — independent
 - U8 (Tier B) — depends on U4
 - U9 (screenshot_page additions) — depends on U4, U8
