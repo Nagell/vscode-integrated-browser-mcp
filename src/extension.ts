@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { McpBridgeServer } from './mcpServer.js';
 import * as bridge from './browserBridge.js';
+import { ensureClaudeMcpEntry } from './install/claudeConfig.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
@@ -46,6 +47,9 @@ export async function activate(context: vscode.ExtensionContext) {
             await server.start(port);
             output.appendLine(`MCP server started on http://127.0.0.1:${port}/mcp`);
             runParseProbe(server, output);
+            ensureClaudeMcpEntry(context, output, port).catch(err => {
+                output?.appendLine(`[claudeConfig] unexpected error: ${err}`);
+            });
         } catch (err) {
             output.appendLine(`Failed to start MCP server: ${err}`);
             // EADDRINUSE already shows a specific message from the server error handler.

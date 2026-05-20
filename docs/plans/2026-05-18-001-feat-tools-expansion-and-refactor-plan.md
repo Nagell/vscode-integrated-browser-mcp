@@ -1639,22 +1639,18 @@ when the tool units land.
 
 ---
 
-### ▶ NEXT: Phase 1 — Structural foundation
+### ~~Phase 1 — Structural foundation~~ — complete (2026-05-20)
 
-- U1 (helpers extracted)
-- U2 (split into `src/tools/`)
+- U1 — `src/util/mcpResult.ts`, `src/tools/_schemas.ts`, `src/tools/_context.ts` extracted
+- U2 — `mcpServer.ts` split into 5 `src/tools/*.ts` registrars
 
-Lands after the consent gate so the registrar shape reflects the verified
-architectural posture.
+### ~~Phase 2 — Investigation & UX~~ — complete (2026-05-20)
 
-### Phase 2 — Investigation & UX
-- U3 (permission UX investigation)
-- U4 (run_playwright_code helpers)
+- U3 — `docs/DEVELOPMENT.md` permission dialog scope documented
+- U4 — `extractRpcResult`, `decodeBuffer`, `runPlaywrightCode` in `browserBridge.ts`; startup parse probe in `extension.ts`; `parseContract` on `McpBridgeServer`
 
-Can run in parallel with Phase 1's tail. U3 outcomes influence Phase 4's volume
-of LM-tool routing choices.
+### ▶ NEXT: Phase 3 — Features
 
-### Phase 3 — Features
 - U5 (auto-register)
 - U6 (page adoption)
 

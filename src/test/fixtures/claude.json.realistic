@@ -1,0 +1,30 @@
+{
+  "oauthAccount": {
+    "emailAddress": "user@example.com",
+    "organizationName": "Example Org"
+  },
+  "theme": "dark",
+  "telemetry": {
+    "enabled": false,
+    "deviceId": "aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa"
+  },
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "redacted"
+      }
+    }
+  },
+  "recentProjects": [
+    "/home/user/projects/foo",
+    "/home/user/projects/bar"
+  ]
+}

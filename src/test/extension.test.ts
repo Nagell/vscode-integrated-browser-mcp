@@ -1,9 +1,13 @@
 import * as assert from 'assert';
+import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from '../mcpServer.js';
 import { errContent } from '../util/mcpResult.js';
 import { extractRpcResult, decodeBuffer } from '../browserBridge.js';
+import { mergeEntry, alreadyRegistered } from '../install/claudeConfig.js';
 
 const TEST_PORT = 3199;
 
@@ -324,5 +328,79 @@ suite('McpBridgeServer', () => {
         } finally {
             await server2.stop().catch(() => { /* already failed */ });
         }
+    });
+});
+
+// Compiled to out/test/ — go up two levels to reach src/test/fixtures/
+const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'test', 'fixtures', 'claude.json.realistic');
+
+suite('mergeEntry', () => {
+    test('adds integratedBrowser to empty config', () => {
+        const merged = mergeEntry({}, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(merged.mcpServers, {
+            integratedBrowser: { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        });
+    });
+
+    test('preserves all other top-level keys', () => {
+        const existing = { theme: 'dark', telemetry: { enabled: false }, mcpServers: { other: { type: 'stdio' } } };
+        const merged = mergeEntry(existing, 'http://127.0.0.1:3100/mcp');
+        assert.strictEqual(merged.theme, 'dark');
+        assert.deepStrictEqual(merged.telemetry, { enabled: false });
+        assert.ok('other' in (merged.mcpServers as object), 'existing server preserved');
+        assert.ok('integratedBrowser' in (merged.mcpServers as object), 'new entry added');
+    });
+
+    test('overwrites existing integratedBrowser entry', () => {
+        const existing = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:9999/mcp' } } };
+        const merged = mergeEntry(existing, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(
+            (merged.mcpServers as Record<string, unknown>).integratedBrowser,
+            { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        );
+    });
+
+    test('realistic fixture: integratedBrowser added, all other keys preserved', () => {
+        const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf-8')) as Record<string, unknown>;
+        const merged = mergeEntry(fixture, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(
+            (merged.mcpServers as Record<string, unknown>).integratedBrowser,
+            { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        );
+        for (const key of Object.keys(fixture)) {
+            if (key === 'mcpServers') { continue; }
+            assert.deepStrictEqual(merged[key], fixture[key], `top-level key "${key}" was not preserved`);
+        }
+        const fixtureMcp = fixture.mcpServers as Record<string, unknown>;
+        const mergedMcp = merged.mcpServers as Record<string, unknown>;
+        for (const key of Object.keys(fixtureMcp)) {
+            assert.deepStrictEqual(mergedMcp[key], fixtureMcp[key], `mcpServers.${key} was not preserved`);
+        }
+    });
+});
+
+suite('alreadyRegistered', () => {
+    test('returns false for empty config', () => {
+        assert.strictEqual(alreadyRegistered({}, 'http://127.0.0.1:3100/mcp'), false);
+    });
+
+    test('returns true when exact URL matches', () => {
+        const config = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:3100/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), true);
+    });
+
+    test('returns true when localhost matches 127.0.0.1', () => {
+        const config = { mcpServers: { myBrowser: { type: 'http', url: 'http://localhost:3100/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), true);
+    });
+
+    test('returns false when port differs', () => {
+        const config = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:9999/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), false);
+    });
+
+    test('returns false when only other servers present', () => {
+        const config = { mcpServers: { github: { type: 'stdio', command: 'npx' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), false);
     });
 });
