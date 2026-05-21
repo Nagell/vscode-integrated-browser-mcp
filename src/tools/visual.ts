@@ -10,16 +10,24 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
     const { output } = ctx;
 
     server.registerTool('screenshot_page', {
-        description: 'Take a screenshot of the current page in the Integrated Browser.',
+        description: 'Take a screenshot of the current page in the Integrated Browser. ' +
+            'Pass fullPage: true for a full-page capture (taller than the viewport). ' +
+            'Pass waitMs to pause before capturing (useful for animations).',
         inputSchema: {
             pageId: pageIdSchema,
             ref: refSchema,
-            selector: selectorSchema
+            selector: selectorSchema,
+            fullPage: z.boolean().optional().describe('Capture the full scrollable page (default: false)'),
+            waitMs: z.number().int().min(0).max(30000).optional().describe('Milliseconds to wait before capturing (max 30000)')
         }
-    }, async ({ pageId, ref, selector }) => {
-        output.appendLine(`[tool] screenshot_page pageId=${pageId}`);
+    }, async ({ pageId, ref, selector, fullPage, waitMs }) => {
+        output.appendLine(`[tool] screenshot_page pageId=${pageId} fullPage=${fullPage} waitMs=${waitMs}`);
+        const guard = (fullPage || (waitMs !== undefined && waitMs > 0))
+            ? parseContractGuard(ctx.parseContract.status, ctx.parseContract.details)
+            : null;
+        if (guard) { return guard; }
         try {
-            return { content: await bridge.screenshotPage(pageId, ref, selector) as McpContent[] };
+            return { content: await bridge.screenshotPage(pageId, ref, selector, fullPage, waitMs) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] screenshot_page: ${err}`);
             return errContent(err);

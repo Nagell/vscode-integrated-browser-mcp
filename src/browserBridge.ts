@@ -94,7 +94,16 @@ export async function readPage(pageId: string): Promise<McpContent[]> {
     return resultToMcp(result);
 }
 
-export async function screenshotPage(pageId: string, ref?: string, selector?: string): Promise<McpContent[]> {
+export async function screenshotPage(pageId: string, ref?: string, selector?: string, fullPage?: boolean, waitMs?: number): Promise<McpContent[]> {
+    if (fullPage || (waitMs !== undefined && waitMs > 0)) {
+        const wMs = Number(waitMs) || 0;
+        const code = `${wMs > 0 ? `await page.waitForTimeout(${wMs}); ` : ''}return await page.screenshot({ type: 'jpeg', quality: 80, fullPage: ${Boolean(fullPage)} });`;
+        const raw = await runPlaywrightCode(pageId, code);
+        if (!raw) { throw new Error('screenshot_page: no data returned from run_playwright_code'); }
+        const bytes = decodeBuffer(raw);
+        const b64 = Buffer.from(bytes).toString('base64');
+        return [{ type: 'image', data: b64, mimeType: 'image/jpeg' }];
+    }
     const input: Record<string, unknown> = { pageId };
     if (ref) { input.ref = ref; }
     if (selector) { input.selector = selector; }

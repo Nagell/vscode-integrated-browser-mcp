@@ -302,6 +302,27 @@ suite('McpBridgeServer', () => {
             }
         });
 
+        test('screenshot_page schema includes fullPage and waitMs fields', async () => {
+            const res = await rpc('tools/list', {}, 2);
+            const payload = parseResult(res.body) as { result: { tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[] } };
+            const tool = payload.result.tools.find(t => t.name === 'screenshot_page');
+            assert.ok(tool, 'screenshot_page not found');
+            const props = tool.inputSchema.properties ?? {};
+            assert.ok('fullPage' in props, 'fullPage field missing from screenshot_page schema');
+            assert.ok('waitMs' in props, 'waitMs field missing from screenshot_page schema');
+        });
+
+        test('screenshot_page without fullPage/waitMs succeeds (no parseContract error path)', async () => {
+            const res = await rpc('tools/call', { name: 'screenshot_page', arguments: { pageId: 'x', fullPage: false } }, 2);
+            assert.strictEqual(res.status, 200);
+            const payload = parseResult(res.body) as { result: { isError?: boolean } };
+            // With no real browser, will error — but must NOT be a parseContract diverged error
+            if (payload.result.isError) {
+                const text = (payload.result as unknown as { content: { text: string }[] }).content?.[0]?.text ?? '';
+                assert.ok(!text.includes('cannot parse VS Code'), `unexpected parseContract error: ${text}`);
+            }
+        });
+
         test('list_pages returns empty for a fresh session', async () => {
             const res = await rpc('tools/call', { name: 'list_pages', arguments: {} }, 2);
             assert.strictEqual(res.status, 200);
