@@ -227,6 +227,40 @@ export async function scrollPage(pageId: string, deltaX?: number, deltaY?: numbe
     await runPlaywrightCode(pageId, code);
 }
 
+export async function markdown(pageId: string, selector?: string): Promise<string | undefined> {
+    const code = `return await page.evaluate((sel) => {
+    const bt = String.fromCharCode(96);
+    const root = sel
+        ? document.querySelector(sel)
+        : (document.querySelector('main') ?? document.body);
+    if (!root) { return sel ? 'Selector did not match any element' : ''; }
+    function walk(node) {
+        if (node.nodeType === 3) { return node.textContent ?? ''; }
+        if (node.nodeType !== 1) { return ''; }
+        const tag = node.tagName;
+        const ch = () => Array.from(node.childNodes).map(walk).join('');
+        if (/^H[1-6]$/.test(tag)) { return '#'.repeat(parseInt(tag[1])) + ' ' + node.textContent.trim() + '\\n\\n'; }
+        if (tag === 'P') { return ch() + '\\n\\n'; }
+        if (tag === 'BR') { return '\\n'; }
+        if (tag === 'A') { return '[' + ch() + '](' + (node.href ?? '') + ')'; }
+        if (tag === 'CODE' && node.parentElement?.tagName !== 'PRE') { return bt + ch() + bt; }
+        if (tag === 'PRE') {
+            const cEl = node.querySelector('code');
+            const lang = (cEl?.className ?? '').replace('language-', '');
+            const text = (cEl ?? node).textContent ?? '';
+            return bt + bt + bt + lang + '\\n' + text + '\\n' + bt + bt + bt + '\\n\\n';
+        }
+        if (tag === 'UL') { return Array.from(node.children).map(li => '- ' + li.textContent.trim() + '\\n').join('') + '\\n'; }
+        if (tag === 'OL') { return Array.from(node.children).map(li => '1. ' + li.textContent.trim() + '\\n').join('') + '\\n'; }
+        if (tag === 'BLOCKQUOTE') { return '> ' + ch().trim() + '\\n\\n'; }
+        if (tag === 'IMG') { return '![' + (node.alt ?? '') + '](' + (node.src ?? '') + ')'; }
+        return ch();
+    }
+    return walk(root).replace(/\\n{3,}/g, '\\n\\n').trim();
+}, ${JSON.stringify(selector ?? null)});`;
+    return runPlaywrightCode(pageId, code);
+}
+
 export async function emulate(pageId: string, width: number, height: number): Promise<void> {
     const code = `await page.setViewportSize({ width: ${Number(width)}, height: ${Number(height)} });`;
     await runPlaywrightCode(pageId, code);

@@ -1660,9 +1660,10 @@ when the tool units land.
 - U8 — `eval_js`, `get_dom` in `src/tools/content.ts`; `scroll` in `src/tools/interaction.ts`; `emulate` in `src/tools/visual.ts`; `get_url` in `src/tools/page.ts`; `parseContractGuard` helper in `src/util/mcpResult.ts`; 18 tools total
 - U9 — `screenshot_page` extended with `fullPage`/`waitMs`; branches to `run_playwright_code` + `decodeBuffer` when either is set; 38 tests passing
 - U10 — `screenshot_slice` in `src/tools/visual.ts`; `screenshotSlice` + `normalizeSlice` in `browserBridge.ts`; Pythonic negative indexing, scroll-restore via try/finally; 6 normalizeSlice unit tests; 44 tests passing
-- U11, U12, U16 — pending
+- U11 — `markdown` in `src/tools/content.ts`; `markdown()` bridge with ~30-line inline DOM walker (no deps); scopes to `<main>`/`<body>`/selector; 44 tests passing
+- U12, U16 — pending
 
-### ▶ NEXT: Phase 4 (continued) — U11, U12, U16
+### ▶ NEXT: Phase 4 (continued) — U12, U16
 
 - U10 (screenshot_slice) — done
 - U11 (markdown) — depends on U4

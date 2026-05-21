@@ -41,6 +41,27 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
         }
     });
 
+    server.registerTool('markdown', {
+        description: 'Extract page content as clean markdown. ' +
+            'Scopes to <main> by default, or <body> when no <main> is present. ' +
+            'Pass a selector to scope to a specific element.',
+        inputSchema: {
+            pageId: pageIdSchema,
+            selector: selectorSchema
+        }
+    }, async ({ pageId, selector }) => {
+        output.appendLine(`[tool] markdown pageId=${pageId} selector=${selector}`);
+        const guard = parseContractGuard(ctx.parseContract.status, ctx.parseContract.details);
+        if (guard) { return guard; }
+        try {
+            const result = await bridge.markdown(pageId, selector);
+            return { content: [{ type: 'text', text: result ?? '' }] as McpContent[] };
+        } catch (err) {
+            output.appendLine(`[error] markdown: ${err}`);
+            return errContent(err);
+        }
+    });
+
     server.registerTool('get_dom', {
         description: 'Get the outer HTML of the page or a specific element.',
         inputSchema: {
