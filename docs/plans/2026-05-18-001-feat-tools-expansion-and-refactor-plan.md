@@ -1661,9 +1661,10 @@ when the tool units land.
 - U9 — `screenshot_page` extended with `fullPage`/`waitMs`; branches to `run_playwright_code` + `decodeBuffer` when either is set; 38 tests passing
 - U10 — `screenshot_slice` in `src/tools/visual.ts`; `screenshotSlice` + `normalizeSlice` in `browserBridge.ts`; Pythonic negative indexing, scroll-restore via try/finally; 6 normalizeSlice unit tests; 44 tests passing
 - U11 — `markdown` in `src/tools/content.ts`; `markdown()` bridge with ~30-line inline DOM walker (no deps); scopes to `<main>`/`<body>`/selector; 44 tests passing
-- U12, U16 — pending
+- U12 — `get_console`/`clear_console` in `src/tools/diagnostic.ts`; Mechanism B (in-page injection via `page.evaluate`, idempotent re-inject on every `get_console`); auto-inject fire-and-forget in `open_browser_page`; 44 tests passing
+- U16 — pending
 
-### ▶ NEXT: Phase 4 (continued) — U12, U16
+### ▶ NEXT: Phase 4 (continued) — U16
 
 - U10 (screenshot_slice) — done
 - U11 (markdown) — depends on U4

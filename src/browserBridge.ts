@@ -266,6 +266,36 @@ export async function emulate(pageId: string, width: number, height: number): Pr
     await runPlaywrightCode(pageId, code);
 }
 
+// Idempotent injection snippet shared by injectConsoleCapture and getConsole.
+const CONSOLE_INJECT = `await page.evaluate(() => {
+    if (window.__mcpConsole) return;
+    window.__mcpConsole = [];
+    for (const level of ['log','warn','error','info','debug']) {
+        const orig = console[level].bind(console);
+        console[level] = (...args) => {
+            try { window.__mcpConsole.push({ level, ts: Date.now(), args: args.map(a => { try { return String(a); } catch { return '[unstringifiable]'; } }) }); } catch {}
+            orig(...args);
+        };
+    }
+});`;
+
+export async function injectConsoleCapture(pageId: string): Promise<void> {
+    await runPlaywrightCode(pageId, CONSOLE_INJECT);
+}
+
+export async function getConsole(pageId: string, levels?: string[]): Promise<string | undefined> {
+    const code = `${CONSOLE_INJECT}
+return await page.evaluate((lvls) => {
+    const buf = window.__mcpConsole ?? [];
+    return JSON.stringify(lvls && lvls.length > 0 ? buf.filter(e => lvls.includes(e.level)) : buf);
+}, ${JSON.stringify(levels ?? null)});`;
+    return runPlaywrightCode(pageId, code);
+}
+
+export async function clearConsole(pageId: string): Promise<void> {
+    await runPlaywrightCode(pageId, `await page.evaluate(() => { window.__mcpConsole = []; });`);
+}
+
 // Positive slice: clamp to [0, totalSlices-1]. Negative slice: wrap (e.g. -1 → last).
 export function normalizeSlice(slice: number, totalSlices: number): number {
     return slice >= 0
