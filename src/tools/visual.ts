@@ -34,6 +34,29 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
         }
     });
 
+    server.registerTool('screenshot_slice', {
+        description: 'Capture a single viewport-height slice of the page. ' +
+            'Use slice=0 for the top, slice=-1 for the last slice. ' +
+            'Positive overshoot clamps to the last slice; negative wraps from the end. ' +
+            'Returns a metadata text part (totalSlices, scrollHeight, etc.) followed by the JPEG image.',
+        inputSchema: {
+            pageId: pageIdSchema,
+            slice: z.number().int().describe('Slice index (0 = top; -1 = last; positive overshoot clamps)'),
+            width: z.number().int().positive().max(8192).optional().describe('Set viewport width before slicing'),
+            height: z.number().int().positive().max(8192).optional().describe('Set viewport height before slicing')
+        }
+    }, async ({ pageId, slice, width, height }) => {
+        output.appendLine(`[tool] screenshot_slice pageId=${pageId} slice=${slice}`);
+        const guard = parseContractGuard(ctx.parseContract.status, ctx.parseContract.details);
+        if (guard) { return guard; }
+        try {
+            return { content: await bridge.screenshotSlice(pageId, slice, width, height) as McpContent[] };
+        } catch (err) {
+            output.appendLine(`[error] screenshot_slice: ${err}`);
+            return errContent(err);
+        }
+    });
+
     server.registerTool('emulate', {
         description: 'Set the browser viewport size. Affects screenshot output and CSS layout (responsive breakpoints), not the visible panel size.',
         inputSchema: {

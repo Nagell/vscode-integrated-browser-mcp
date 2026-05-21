@@ -1659,11 +1659,12 @@ when the tool units land.
 - U7 — `hover_element`, `drag_element`, `handle_dialog` in `src/tools/interaction.ts`; `hoverElement`, `dragElement`, `handleDialog` wrappers in `browserBridge.ts`
 - U8 — `eval_js`, `get_dom` in `src/tools/content.ts`; `scroll` in `src/tools/interaction.ts`; `emulate` in `src/tools/visual.ts`; `get_url` in `src/tools/page.ts`; `parseContractGuard` helper in `src/util/mcpResult.ts`; 18 tools total
 - U9 — `screenshot_page` extended with `fullPage`/`waitMs`; branches to `run_playwright_code` + `decodeBuffer` when either is set; 38 tests passing
-- U10, U11, U12, U16 — pending
+- U10 — `screenshot_slice` in `src/tools/visual.ts`; `screenshotSlice` + `normalizeSlice` in `browserBridge.ts`; Pythonic negative indexing, scroll-restore via try/finally; 6 normalizeSlice unit tests; 44 tests passing
+- U11, U12, U16 — pending
 
-### ▶ NEXT: Phase 4 (continued) — U10, U11, U12, U16
+### ▶ NEXT: Phase 4 (continued) — U11, U12, U16
 
-- U10 (screenshot_slice) — depends on U4, U8, U9
+- U10 (screenshot_slice) — done
 - U11 (markdown) — depends on U4
 - U12 (console capture) — depends on U4
 - U16 per-Tier integration tests — each Tier's test lands in the same PR as

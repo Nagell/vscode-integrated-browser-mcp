@@ -231,3 +231,47 @@ export async function emulate(pageId: string, width: number, height: number): Pr
     const code = `await page.setViewportSize({ width: ${Number(width)}, height: ${Number(height)} });`;
     await runPlaywrightCode(pageId, code);
 }
+
+// Positive slice: clamp to [0, totalSlices-1]. Negative slice: wrap (e.g. -1 → last).
+export function normalizeSlice(slice: number, totalSlices: number): number {
+    return slice >= 0
+        ? Math.min(slice, totalSlices - 1)
+        : ((slice % totalSlices) + totalSlices) % totalSlices;
+}
+
+export async function screenshotSlice(pageId: string, slice: number, width?: number, height?: number): Promise<McpContent[]> {
+    if (width !== undefined && height !== undefined) {
+        await runPlaywrightCode(pageId, `await page.setViewportSize({ width: ${Number(width)}, height: ${Number(height)} });`);
+    }
+    const code = `
+const vp = await page.viewportSize();
+const vh = vp?.height ?? 800;
+const vw = vp?.width ?? 1280;
+const scrollH = await page.evaluate(() => document.documentElement.scrollHeight);
+const totalSlices = Math.max(1, Math.ceil(scrollH / vh));
+const rawSlice = ${Number(slice)};
+const normalizedSlice = rawSlice >= 0
+    ? Math.min(rawSlice, totalSlices - 1)
+    : ((rawSlice % totalSlices) + totalSlices) % totalSlices;
+const prevY = await page.evaluate(() => window.scrollY);
+try {
+    await page.evaluate(y => window.scrollTo(0, y), normalizedSlice * vh);
+    await page.waitForTimeout(200);
+    const image = await page.screenshot({ type: 'jpeg', quality: 80 });
+    return JSON.stringify({ image, meta: { totalSlices, scrollHeight: scrollH, viewportHeight: vh, viewportWidth: vw, slice: normalizedSlice } });
+} finally {
+    await page.evaluate(y => window.scrollTo(0, y), prevY);
+}`;
+    const raw = await runPlaywrightCode(pageId, code);
+    if (!raw) { throw new Error('screenshot_slice: no data returned'); }
+    let parsed: { image: unknown; meta: { totalSlices: number; scrollHeight: number; viewportHeight: number; viewportWidth: number; slice: number } };
+    try { parsed = JSON.parse(raw) as typeof parsed; } catch {
+        throw new Error(`screenshot_slice: failed to parse result: ${raw.slice(0, 100)}`);
+    }
+    const bytes = decodeBuffer(JSON.stringify(parsed.image));
+    const b64 = Buffer.from(bytes).toString('base64');
+    return [
+        { type: 'text', text: JSON.stringify(parsed.meta) },
+        { type: 'image', data: b64, mimeType: 'image/jpeg' }
+    ];
+}

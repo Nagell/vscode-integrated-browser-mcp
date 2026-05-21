@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from '../mcpServer.js';
 import { errContent } from '../util/mcpResult.js';
-import { extractRpcResult, decodeBuffer } from '../browserBridge.js';
+import { extractRpcResult, decodeBuffer, normalizeSlice } from '../browserBridge.js';
 import { mergeEntry, alreadyRegistered } from '../install/claudeConfig.js';
 
 const TEST_PORT = 3199;
@@ -105,6 +105,19 @@ suite('decodeBuffer', () => {
 
     test('throws on invalid JSON with Buffer in message', () => {
         assert.throws(() => decodeBuffer('not json'), /Buffer/);
+    });
+});
+
+suite('normalizeSlice', () => {
+    test('slice 0 of 5 returns 0', () => assert.strictEqual(normalizeSlice(0, 5), 0));
+    test('slice 4 of 5 returns 4', () => assert.strictEqual(normalizeSlice(4, 5), 4));
+    test('slice -1 of 5 returns 4 (last)', () => assert.strictEqual(normalizeSlice(-1, 5), 4));
+    test('slice -5 of 5 returns 0', () => assert.strictEqual(normalizeSlice(-5, 5), 0));
+    test('positive overshoot clamps to last (7 of 5 → 4)', () => assert.strictEqual(normalizeSlice(7, 5), 4));
+    test('totalSlices 1: any index returns 0', () => {
+        assert.strictEqual(normalizeSlice(0, 1), 0);
+        assert.strictEqual(normalizeSlice(5, 1), 0);
+        assert.strictEqual(normalizeSlice(-1, 1), 0);
     });
 });
 
@@ -284,7 +297,7 @@ suite('McpBridgeServer', () => {
             assert.ok(res.status >= 200 && res.status < 300, `expected 2xx, got ${res.status}: ${res.body}`);
         });
 
-        test('tools/list returns all 18 expected tools', async () => {
+        test('tools/list returns all 19 expected tools', async () => {
             const res = await rpc('tools/list', {}, 2);
             assert.strictEqual(res.status, 200);
             const payload = parseResult(res.body) as { result: { tools: { name: string }[] } };
@@ -292,11 +305,11 @@ suite('McpBridgeServer', () => {
             const expected = [
                 'open_browser_page', 'list_pages', 'close_page', 'navigate_page',
                 'list_visible_pages', 'attach_visible_page', 'get_url',
-                'screenshot_page', 'emulate',
+                'screenshot_page', 'screenshot_slice', 'emulate',
                 'read_page', 'eval_js', 'get_dom',
                 'click_element', 'type_in_page', 'hover_element', 'drag_element', 'handle_dialog', 'scroll'
             ];
-            assert.strictEqual(names.length, 18, `expected 18 tools, got: ${names.join(', ')}`);
+            assert.strictEqual(names.length, 19, `expected 19 tools, got: ${names.join(', ')}`);
             for (const name of expected) {
                 assert.ok(names.includes(name), `expected tool "${name}" in list, got: ${names.join(', ')}`);
             }
