@@ -151,12 +151,42 @@ The **Integrated Browser MCP** output channel (View → Output → select from d
 pnpm test
 ```
 
-Runs automated tests against a real `McpBridgeServer` instance started on port 3199 inside VS Code's test extension host. Covers:
+Runs automated tests inside VS Code's test extension host. Two categories:
 
-- HTTP infrastructure (health endpoint, session lifecycle, error responses, EADDRINUSE)
-- MCP protocol (all 8 tools registered, `list_pages` empty on fresh session, `close_page` succeeds with unknown page ID)
+**Unit / server tests** (`src/test/extension.test.ts`, port 3199) — cover HTTP infrastructure, MCP protocol, tool registration, and schema validation. Do **not** invoke VS Code browser tools.
 
-These tests do **not** invoke the VS Code browser tools — they test the server layer only. Full end-to-end browser testing requires the manual test runbook below.
+**Integration tests** (`src/test/integration/tier-*.test.ts`, port 3198) — call real MCP tools end-to-end through `vscode.lm.invokeTool`. Each Tier has one happy-path test:
+
+| File | Tier | Scenario |
+|---|---|---|
+| `tier-b.test.ts` | B | `eval_js` `1 + 1` → `"2"` |
+| `tier-c.test.ts` | C | `screenshot_page` → JPEG bytes `0xFF 0xD8` |
+| `tier-d.test.ts` | D | inject `<h1>Hello</h1>`, `markdown` → `# Hello` |
+| `tier-e.test.ts` | E | `console.log("boom")` via eval_js, `get_console` → entry contains `boom` |
+
+Integration tests **skip gracefully** if `open_browser_page` fails (i.e. no workbench renderer is available — `if (!pageId) { return; }`). This means they pass in unit-only CI runs but produce real coverage when VS Code has a display context (xvfb or local dev host).
+
+### CI test environment
+
+The GitHub Actions workflow (`.github/workflows/test.yml`) runs on a Linux runner using `xvfb-run -a pnpm test` to provide a virtual display. VS Code's extension host starts under Xvfb, which enables the integration tests to call `vscode.lm.invokeTool` and open real browser tabs.
+
+**Debugging CI failures locally:**
+
+```sh
+# Run exactly as CI does (requires Xvfb)
+xvfb-run -a pnpm test
+
+# Run without Xvfb (integration tests skip gracefully, unit tests run normally)
+pnpm test
+
+# Run a single test file
+pnpm test --grep "Tier B"
+```
+
+**If integration tests are skipped in CI** (all four tier suites pass but assertions are not reached): the workbench renderer is not opening the browser panel. Check:
+1. `workbench.browser.enableChatTools: true` is set in `src/test/workspace/.vscode/settings.json`
+2. The `lm-tool-availability` test is green (tools are registered)
+3. `open_browser_page` is present in `vscode.lm.tools` but `invokeTool` fails — VS Code may require a panel to be opened first; add `vscode.commands.executeCommand('simpleBrowser.show', 'about:blank')` to `suiteSetup` in `_helpers.ts` if needed
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 

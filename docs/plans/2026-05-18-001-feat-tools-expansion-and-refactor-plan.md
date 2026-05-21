@@ -1662,17 +1662,9 @@ when the tool units land.
 - U10 — `screenshot_slice` in `src/tools/visual.ts`; `screenshotSlice` + `normalizeSlice` in `browserBridge.ts`; Pythonic negative indexing, scroll-restore via try/finally; 6 normalizeSlice unit tests; 44 tests passing
 - U11 — `markdown` in `src/tools/content.ts`; `markdown()` bridge with ~30-line inline DOM walker (no deps); scopes to `<main>`/`<body>`/selector; 44 tests passing
 - U12 — `get_console`/`clear_console` in `src/tools/diagnostic.ts`; Mechanism B (in-page injection via `page.evaluate`, idempotent re-inject on every `get_console`); auto-inject fire-and-forget in `open_browser_page`; 44 tests passing
-- U16 — pending
+- U16 — `src/test/integration/tier-b.test.ts` (eval_js), `tier-c.test.ts` (screenshot_page), `tier-d.test.ts` (markdown), `tier-e.test.ts` (get_console); shared `_helpers.ts` McpTestClient on port 3198; graceful skip when browser unavailable; DEVELOPMENT.md CI section added
 
-### ▶ NEXT: Phase 4 (continued) — U16
-
-- U10 (screenshot_slice) — done
-- U11 (markdown) — depends on U4
-- U12 (console capture) — depends on U4
-- U16 per-Tier integration tests — each Tier's test lands in the same PR as
-  the Tier's tools (if the Phase 0 spike confirmed CI viability)
-
-These can ship as separate PRs and merge in any consistent order.
+### ▶ NEXT: Phase 5 — U14, U15
 
 ### Phase 5 — Cross-cutting features
 - U14 (element selection push) — depends on U2; investigation-led
