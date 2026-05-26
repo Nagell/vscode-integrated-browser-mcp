@@ -235,7 +235,33 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        output
+        output,
+
+        // Spike: register as a VS Code LM tool to test whether toolInvocationToken flows through
+        // when Claude Code (in VS Code's chat context) invokes us. If hasToken=true in the output
+        // channel, passing the token to subsequent invokeTool calls suppresses the consent dialog.
+        vscode.lm.registerTool('browser_screenshot', {
+            invoke: async (options: vscode.LanguageModelToolInvocationOptions<{ pageId: string }>, _ct: vscode.CancellationToken) => {
+                const { pageId } = options.input;
+                // toolInvocationToken is typed undefined but may be a real opaque object at runtime
+                const hasToken = (options.toolInvocationToken as unknown) !== undefined;
+                output?.appendLine(`[lm-tool:browser_screenshot] pageId=${pageId} hasToken=${hasToken}`);
+
+                const cts = new vscode.CancellationTokenSource();
+                try {
+                    const result = await vscode.lm.invokeTool('screenshot_page', {
+                        input: { pageId },
+                        toolInvocationToken: options.toolInvocationToken
+                    }, cts.token);
+                    const note = new vscode.LanguageModelTextPart(
+                        `[spike: toolInvocationToken ${hasToken ? 'PRESENT ✓ — no dialog expected' : 'absent ✗ — dialog shown'}]\n`
+                    );
+                    return new vscode.LanguageModelToolResult([note, ...result.content]);
+                } finally {
+                    cts.dispose();
+                }
+            }
+        })
     );
 }
 

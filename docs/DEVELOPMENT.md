@@ -61,6 +61,15 @@ MCP client (Claude Code, Cline, Continue.dev, …)
 
 Each connected MCP client session gets its own `StreamableHTTPServerTransport` instance and a `pages` map tracking open page IDs. Page IDs are assigned by VS Code and required by every browser tool call after `open_browser_page`.
 
+### Naming conventions
+
+| Form | Meaning | When to use |
+| --- | --- | --- |
+| `run_playwright_code` | The VS Code LM tool identifier — the string passed to `vscode.lm.invokeTool()` | Tool name in strings, consent dialog discussion, "route through the LM tool" |
+| `runPlaywrightCode()` | The TypeScript function exported from `src/browserBridge.ts` | Code references, call sites, function names in TS context |
+
+The same pattern applies to all tool pairs: `open_browser_page` (LM tool ID) vs. `openBrowserPage()` (TS function), etc.
+
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
 ## Permission dialog scope

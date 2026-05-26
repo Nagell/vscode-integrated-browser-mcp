@@ -95,9 +95,13 @@ than it needs to be.
 
 ## Scope Boundaries
 
-- Not switching the tool bridge away from `vscode.lm.invokeTool()` in favor of CDP —
-  invokeTool remains the architectural foundation (the user explicitly prefers it
-  over the competing CDP-based approach).
+- **Partial CDP (Approach B)**: Tier A tools (`open_browser_page`, `read_page`,
+  `screenshot_page`, `navigate_page`, `click_element`, `type_in_page`, `hover_element`,
+  `drag_element`, `handle_dialog`) remain as `vscode.lm.invokeTool()` calls — each fires
+  once per VS Code session, then caches silently. Tiers B/C/D/E switch from
+  `run_playwright_code` to CDP `Runtime.evaluate` (U17), eliminating per-unique-script
+  consent dialogs. Full CDP replacement of Tier A is out of scope here — it would require
+  re-implementing VS Code's accessibility tree and element-ref system.
 - Not introducing third-party DOM-to-markdown libraries (Turndown, Readability) —
   markdown is implemented as ~80 lines of in-page JS passed to `run_playwright_code`.
 - Not implementing the network capture / download tools that the competing extension
@@ -121,6 +125,41 @@ than it needs to be.
 - Cross-WSL/Windows config writer for the auto-register feature: `Known limitations`
   in `docs/DEVELOPMENT.md` already documents this; out of scope for U5.
 
+### Deferred / Open Questions — From 2026-05-26 Review
+
+- **U15 scope vs. solo-dev use case:** U15 (multi-window support) adds `portRegistry.ts`,
+  a lockfile dependency, modifies already-complete U5 code, and introduces a QuickPick
+  disambiguation flow. No concrete user-pain evidence cited. The collision-avoidance fix
+  (retry with port 0 on `EADDRINUSE`) could be added to `mcpServer.ts` in ~5 lines
+  without the registry feature. Revisit whether full U15 is worth the complexity vs.
+  the minimal port-0 fallback only.
+
+- **`CdpSession` abstraction vs. inline tab record:** `CdpSession` is never instantiated
+  independently of `CdpManager` and has no test that doesn't mock its internals. Consider
+  merging into a private `type CdpTabHandle = { evaluate, send, dispose }` inside
+  `CdpManager` to eliminate one file and one class boundary with no behavioral change.
+  Decide during U17 implementation once the API shape is confirmed by the gate experiment.
+
+- **CDP session WebSocket scope (security):** When U17 opens a `requestCDPProxy()` session,
+  confirm during the gate experiment whether the resulting WebSocket endpoint is accessible
+  to other local processes or is a private in-process channel only. Document in
+  `docs/DEVELOPMENT.md` Known Limitations: "CDP session grants full programmatic access
+  to the browsing context (JS, DOM, cookies, storage). The proxy is VS Code-internal;
+  confirm it is not accessible to other OS processes."
+
+- **MCP server no auth + DNS rebinding risk:** The server binds to `127.0.0.1` with no
+  token. Combined with `eval_js`, any local process (or a browser tab exploiting DNS
+  rebinding) can invoke arbitrary JS. Mitigation: add a random session token to the MCP
+  URL written to `~/.claude.json` (e.g. `http://127.0.0.1:<port>/mcp?token=<128-bit>`).
+  Token generation is trivial (`crypto.randomUUID()`); it defeats DNS rebinding and
+  casual process enumeration. Deferred; add to Known Limitations in the meantime.
+
+- **Console capture exfiltration:** `get_console` buffers all `console.*` output from
+  the page and returns it to any MCP session that can reach the server. Pages may log
+  auth tokens, PII, or secrets to the console. Add to the tool description and Known
+  Limitations: "Console capture buffers all `console.*` output including potentially
+  sensitive values. Do not use on pages handling credentials you haven't verified."
+
 ---
 
 ## Context & Research
@@ -131,7 +170,7 @@ than it needs to be.
   `errContent`, `createMcpServerInstance`, the `SessionEntry` / `PageInfo` interfaces,
   and the HTTP transport wiring all live here. The refactor splits these out.
 - [src/browserBridge.ts](src/browserBridge.ts) — `invoke()`, `resultToMcp()`,
-  `extractPageId()`, plus per-tool wrappers. New `run_playwright_code` consumers
+  `extractPageId()`, plus per-tool wrappers. New `runPlaywrightCode()` callers
   share helper code that belongs here: `extractRpcResult` (mirror of the probe's
   parser) and `decodeBuffer` (Buffer-as-JSON → `Uint8Array`).
 - [src/extension.ts](src/extension.ts) — activation, command registration, and the
@@ -171,10 +210,13 @@ than it needs to be.
   before adding any new tool. Each tool file exports `registerXxxTools(server, ctx)`
   with a context object `{ output, pages, bridge }`. Easier to land 12 small PRs on
   a clean shape than to retrofit a 700-line file.
-- **`run_playwright_code` is the workhorse for new tools**: Tiers B, C, D, and E
-  all route through it. This is also the structural workaround for U3 — if VS Code
-  groups consent per-tool, channelling most work through a single tool minimizes
-  prompts compared to firing 12 distinct LM tools.
+- ~~**`run_playwright_code` is the workhorse for new tools**~~ — superseded by U17.
+  Originally Tiers B/C/D/E routed through `run_playwright_code` to minimize consent
+  dialogs, assuming VS Code cached consent per tool. U3 correction (2026-05-22) revealed
+  caching is per **unique script content** — each distinct script (different `eval_js`
+  expression, different `get_dom` selector, `CONSOLE_INJECT`, etc.) triggers its own
+  dialog. U17 replaces `run_playwright_code` with CDP `Runtime.evaluate` for all
+  Tier B/C/D/E calls, eliminating script-execution dialogs entirely.
 - **Helpers live where they are reused**: `errContent` graduates to a small
   `src/util/mcpResult.ts`; `extractRpcResult` and `decodeBuffer` live in
   `src/browserBridge.ts` next to the LM-tool plumbing. No `wrapToolHandler` HOF
@@ -194,16 +236,16 @@ than it needs to be.
 - **Tier A tool input schemas must be probed before implementation**: `hover_element`,
   `drag_element`, `handle_dialog` are read from `vscode.lm.tools[*].inputSchema` at
   development time; the implementation mirrors the schemas verbatim.
-- **Why `invokeTool` over CDP**: this extension intentionally bridges through
-  VS Code's blessed tool path rather than a separate CDP connection (the choice
-  the competing CDP-based extension makes). Reasons: (a) zero user setup — no
-  `--remote-debugging-port` flag in `argv.json`, no VS Code restart; (b)
-  resilient across VS Code versions — the LM tool surface is a stable public
-  API while CDP attach points to the Integrated Browser are not; (c) the
-  consent dialog, while painful (see U3), is the user's correct trust boundary
-  for letting an external agent drive their browser. The trade-off accepted:
-  no network capture, no download tracking, no raw devtools protocol surface.
-  Capabilities that strictly require CDP stay out of scope.
+- **Hybrid CDP strategy (U17)**: Tier A tools remain as `vscode.lm.invokeTool` calls.
+  This preserves VS Code's maintained accessibility tree (`read_page` with stable `ref`
+  IDs) and its element-targeting for `click_element`/`type_in_page` — re-implementing
+  these via CDP would be substantial work for no gain. Tier B/C/D/E tools (all
+  script-execution paths: `eval_js`, `get_dom`, `scroll`, `emulate`, `markdown`,
+  `get_console`, `clear_console`, `screenshot_slice`, `screenshot_page fullPage`,
+  `close_page`) replace `run_playwright_code` with CDP `Runtime.evaluate`. The driver:
+  `run_playwright_code` consent caches per unique script content — every distinct real
+  tool call triggers its own dialog (see U3 correction). CDP eliminates this entirely.
+  Tier A one-time dialogs (~5-6 at session start, then silent) are the accepted trade-off.
 - **`.claude.json` (not `mcp_settings.json`) is the auto-register target on Linux/WSL**:
   the live config on this developer's machine is `~/.claude.json`. Linux/macOS path
   resolution: check `~/.claude.json` first (modern), then `~/.claude/mcp_settings.json`
@@ -217,9 +259,16 @@ than it needs to be.
 
 ### Resolved During Planning
 
-- *Should we switch to CDP for parity with thimo's extension?* — No. invokeTool is
-  the architectural foundation; CDP-only tools (network capture, downloads) stay
-  out of scope.
+- *Should we switch to CDP for parity with thimo's extension?* — Partial yes
+  (Approach B / U17). Tier B/C/D/E tools replace `run_playwright_code` with CDP
+  `Runtime.evaluate` to eliminate per-unique-script consent dialogs. Tier A tools
+  remain as `invokeTool` calls to preserve VS Code's accessibility tree. Full CDP
+  replacement (Tier A too) stays out of scope.
+- *Should Tier B/C/D/E tools use `run_playwright_code` as the workhorse?* — No
+  (corrected 2026-05-22, see U3 Correction). Per-unique-script consent caching
+  makes this unviable: every distinct code string triggers its own dialog. U17
+  replaces all `runPlaywrightCode()` call sites with CDP `Runtime.evaluate` for
+  Tier B/C/D/E, eliminating the per-script dialog problem entirely.
 - *Should markdown depend on Turndown?* — No. ~80 lines of in-page JS, no deps.
 - *Should we adopt the per-tool `wrapToolHandler` HOF?* — Decide after the split
   lands (U2). Only adopt if it removes >50 net lines.
@@ -244,11 +293,13 @@ but should be answered before Phase 4 ramps up.
 - **Promote U6 and U14 earlier**: these are the units thimo's CDP approach
   structurally cannot match (VS Code-native page adoption, in-editor element
   handoff). Should they move ahead of the Tier A–E expansion in priority?
-- **`eval_js` identity decision**: shipping `eval_js` makes the extension an
-  "arbitrary JS execution surface" install, not just a thin VS Code bridge.
-  Either gate it behind a setting (`integratedBrowserMcp.enableArbitraryEval`,
-  default off) or split `run_playwright_code` into per-purpose internal
-  helpers and don't expose a raw eval surface.
+- **`eval_js` identity decision** — **Resolved (2026-05-26):** `eval_js` ships
+  ungated. The extension is already an "arbitrary JS execution" surface via
+  `run_playwright_code`; `eval_js` adds a more convenient interface, not new
+  capability. The localhost-only binding + README security warning ("same trust
+  model as DevTools console, do not expose to untrusted network") is the trust
+  boundary. Adding a toggle would add friction with no real security benefit for
+  the target user (a solo developer running the agent locally).
 
 ### Deferred to Implementation
 
@@ -319,6 +370,7 @@ new tool added in U7–U12, so they must exist before the split.
 **Dependencies:** None
 
 **Files:**
+
 - Create: `src/util/mcpResult.ts` — exports `errContent` and the `McpContent` re-export.
 - Create: `src/tools/_schemas.ts` — exports `pageIdSchema`, `refSchema`, `selectorSchema`,
   `elementSchema` as named zod fragments.
@@ -332,20 +384,24 @@ new tool added in U7–U12, so they must exist before the split.
   `errContent` returns `isError: true` with a text part.
 
 **Approach:**
+
 - Keep `McpContent` definition near its primary consumer; if browserBridge still
   needs it, re-export from there to avoid breaking the import chain.
 - `ToolContext` shape: `interface ToolContext { output: vscode.OutputChannel; pages:
   Map<string, PageInfo>; }` — extend in later units.
 
 **Patterns to follow:**
+
 - Current `errContent` implementation in [src/mcpServer.ts:16-19](src/mcpServer.ts#L16-L19).
 
 **Test scenarios:**
+
 - Happy path: `errContent(new Error('boom'))` returns `{ content: [{ type: 'text',
   text: 'Error: boom' }], isError: true }`.
 - Happy path: `errContent('string error')` formats the text identically.
 
 **Verification:**
+
 - `pnpm run compile` passes.
 - `pnpm test` passes — no regression in existing tool-registration tests.
 
@@ -362,6 +418,7 @@ wiring; `createMcpServerInstance` becomes the registrar-orchestrator.
 **Dependencies:** U1
 
 **Files:**
+
 - Create: `src/tools/page.ts` — registers `open_browser_page`, `list_pages`,
   `close_page`, `navigate_page` (and `get_url` in U8).
 - Create: `src/tools/interaction.ts` — registers `click_element`, `type_in_page`
@@ -377,6 +434,7 @@ wiring; `createMcpServerInstance` becomes the registrar-orchestrator.
   (8 tools).
 
 **Approach:**
+
 - Atomic move: existing tool handler bodies copy verbatim into each registrar file
   with no behavioral changes. Lint and type-check after each registrar.
 - `createMcpServerInstance` signature stays: `(output, pages) => McpServer` — wrap
@@ -390,10 +448,12 @@ behavior is the spec. Run the full test suite after each registrar move; commit
 only when green.
 
 **Patterns to follow:**
+
 - Existing `createMcpServerInstance` body in
   [src/mcpServer.ts:26-172](src/mcpServer.ts#L26-L172).
 
 **Test scenarios:**
+
 - Happy path: server initialization registers exactly the same 8 tools as before
   the split; tool names, descriptions, and schemas match the pre-refactor snapshot.
 - Edge case: `pages` map state is shared across registrars within a single session
@@ -401,6 +461,7 @@ only when green.
   same map).
 
 **Verification:**
+
 - `pnpm test` passes.
 - `git diff src/mcpServer.ts` shows only deletions of tool blocks plus calls to
   the new registrars.
@@ -420,6 +481,7 @@ work through `run_playwright_code` where possible.
 **Dependencies:** None (can run in parallel with U1/U2)
 
 **Files:**
+
 - Modify: `docs/DEVELOPMENT.md` — add a `## Permission dialog scope` section that
   documents the consent behavior, the workaround taken, and any user-facing setting
   that helps (e.g. trusting the extension publisher).
@@ -433,11 +495,12 @@ work through `run_playwright_code` where possible.
   document the dev-mode requirement.
 
 **Approach:**
+
 - Investigation list (in order):
   1. Read VS Code 1.113–1.120 release notes section "Language Model Tools" and
      "Proposed APIs".
   2. List `vscode.lm` API surface in the current `@types/vscode` against the
-     proposed API list at https://github.com/microsoft/vscode/tree/main/src/vscode-dts.
+     proposed API list at <https://github.com/microsoft/vscode/tree/main/src/vscode-dts>.
   3. Search VS Code source for `toolInvocationToken` usage to see how internal
      callers acquire one — specifically look at terminal link handlers and port
      forwarding.
@@ -453,22 +516,28 @@ work through `run_playwright_code` where possible.
 **Results (2026-05-19):** Probe run confirmed **per-call consent on first invocation**.
 6 dialogs for 6 calls (1 × `open_browser_page` + 5 × `run_playwright_code`). VS Code
 caches trust per tool within the session — subsequent calls to the same tool run without
-further prompts. No pre-authorization API exists in VS Code 1.112 for non-chat extensions;
-steps 1–3 of the investigation list (release notes, proposed API scan, `toolInvocationToken`
-source search) remain optional polish but are no longer blocking. **Workhorse routing
-confirmed**: Tiers B/C/D/E should all route through `run_playwright_code` so the user
-approves one tool once per session rather than N tools on first use.
+further prompts. No pre-authorization API exists in VS Code 1.112 for non-chat extensions.
+
+**⚠ Correction (2026-05-22):** The probe used the same script (`return 42;`) for all
+5 × `run_playwright_code` calls, making them appear session-cached. Manual testing with
+the real extension showed VS Code caches consent per **unique script content**, not per
+tool name — every distinct script (different `eval_js` expression, `get_dom` with a
+selector, the multi-line `CONSOLE_INJECT`, etc.) triggers its own dialog. The "workhorse
+routing" conclusion was wrong. **Decision: replace `run_playwright_code` with CDP
+`Runtime.evaluate` for all Tier B/C/D/E tools (U17).**
 
 **Execution note:** This unit is investigation-led. The first step is reading
 release notes and the API surface, not writing code. Record findings in the
 DEVELOPMENT.md section regardless of outcome.
 
 **Test scenarios:**
+
 - Test expectation: none — investigation outcomes are documented in
   `docs/DEVELOPMENT.md`. If a code fix lands, U3 inherits the relevant tool-call
   tests from later units.
 
 **Verification:**
+
 - `docs/DEVELOPMENT.md` includes a clear answer to: "How does the consent dialog
   scope (per-call, per-tool, per-session, per-extension)?" and "What can a user
   do to reduce its frequency?"
@@ -490,6 +559,7 @@ both to the user (output channel) and to the agent (in tool responses).
 **Dependencies:** U2
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add:
   - `extractRpcResult(result: vscode.LanguageModelToolResult): string | undefined`
     that returns the value of the `Result:` field, unwrapping one level of JSON
@@ -503,14 +573,19 @@ both to the user (output channel) and to the agent (in tool responses).
   result shapes (no LM calls needed; construct `LanguageModelTextPart` directly).
 
 **Approach:**
+
 - Lift the probe's `extractRpcResult` verbatim — it is the source of truth for the
   parser. Replace the probe's inline copy with an import in U13.
 - `decodeBuffer` accepts both `{ type: 'Buffer', data: [...] }` and a bare number
   array (the probe handles both with a ternary).
 - **Startup parse probe.** On extension activation, after the MCP server
-  starts, fire one `run_playwright_code` call against a known fixture (e.g.
-  `return 42;` with no active page — or fall back to logging that probe is
-  skipped if no browser page is ready). Apply `extractRpcResult` to the
+  starts, fire one `run_playwright_code` call **only if at least one active
+  `pageId` exists in the pages map** (gate on `pages.size > 0`). If no page
+  is open, set `parseContract.status = 'unverified'` and log a debug message;
+  the probe runs lazily on the first real Tier B/C/D/E tool call where a
+  `pageId` is guaranteed. This prevents a spurious consent dialog on cold
+  activation and avoids false-diverged false positives from an empty-pageId
+  call. Apply `extractRpcResult` to the
   result and confirm the parsed value equals `"42"`. Store the outcome on
   `McpBridgeServer` as `parseContract: { status: 'ok' | 'diverged' | 'unverified'; details?: string }`.
   - On `'ok'`: silently continue.
@@ -526,6 +601,7 @@ both to the user (output channel) and to the agent (in tool responses).
 - **Agent-visible diagnostic.** When `parseContract.status === 'diverged'`,
   every Tier B/C/D/E tool (anything that calls `runPlaywrightCode`) wraps its
   result with an explanatory prefix BEFORE returning:
+
   ```
   {
     isError: true,
@@ -536,16 +612,19 @@ both to the user (output channel) and to the agent (in tool responses).
       '<repo url>. Diagnostic: <parseContract.details>' }]
   }
   ```
+
   The agent sees the issue and can either tell the user, fall back to other
   tools (Tier A still works), or abort cleanly. Without this, the agent
   would receive malformed data and act on it.
 
 **Patterns to follow:**
+
 - `extractRpcResult` and the JPEG-decode block in
   [src/extension.ts:78-86](src/extension.ts#L78-L86) and
   [src/extension.ts:152-161](src/extension.ts#L152-L161).
 
 **Test scenarios:**
+
 - Happy path: `extractRpcResult` on a single `TextPart` with
   `"Result: foo\nPage Title: x"` returns `"foo"`.
 - Happy path: `extractRpcResult` on a `TextPart` with double-quoted result
@@ -558,6 +637,7 @@ both to the user (output channel) and to the agent (in tool responses).
 - Error path: `decodeBuffer('not json')` throws an error mentioning "Buffer".
 
 **Verification:**
+
 - Unit tests pass.
 - The probe command in `src/extension.ts` is refactored in U13 to import the
   helpers, with no behavior change.
@@ -577,6 +657,7 @@ the file if absent). Track "already offered" in `extensionContext.globalState`.
 `src/install/claudeConfig.ts` plus a call from `extension.ts`)
 
 **Files:**
+
 - Create: `src/install/claudeConfig.ts` — exports `ensureClaudeMcpEntry(context,
   output): Promise<void>` that orchestrates the check + prompt + merge.
 - Modify: `src/extension.ts` — call `ensureClaudeMcpEntry(context, output)` after
@@ -585,6 +666,7 @@ the file if absent). Track "already offered" in `extensionContext.globalState`.
   a tmp-file fixture, no actual VS Code notification.
 
 **Approach:**
+
 - Config path resolution (Linux/macOS):
   1. `process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR,
      'claude.json') : path.join(os.homedir(), '.claude.json')` — primary target.
@@ -632,10 +714,12 @@ the file if absent). Track "already offered" in `extensionContext.globalState`.
   count is within the expected delta.
 
 **Patterns to follow:**
+
 - VS Code globalState pattern is standard; no in-repo example yet.
 - Existing `.mcp.json` in repo root for the entry shape.
 
 **Test scenarios:**
+
 - Happy path: file does not exist → merge writes a new file containing exactly the
   expected `mcpServers.integratedBrowser` entry.
 - Happy path: file exists with other `mcpServers` keys → merge preserves them all
@@ -652,6 +736,7 @@ the file if absent). Track "already offered" in `extensionContext.globalState`.
   the written `url`.
 
 **Verification:**
+
 - Unit tests for the merge logic pass against tmp-file fixtures.
 - Manual: fresh VS Code session with a backed-up `~/.claude.json` shows the
   notification; clicking "Add" produces a valid, diff-able merge.
@@ -679,6 +764,7 @@ that design with the agent-driven tool model.
 **Dependencies:** U2 (clean home for the tool registration)
 
 **Files:**
+
 - Modify: `src/tools/page.ts` — register `list_visible_pages` and
   `attach_visible_page`.
 - Modify: `src/browserBridge.ts` — add `enumerateVisibleBrowserTabs(): Array<{
@@ -686,6 +772,7 @@ that design with the agent-driven tool model.
   `vscode.window.tabGroups` for editor-browser tabs and extracts their URLs.
 
 **Approach:**
+
 - **Gate experiment result (2026-05-19, discovered during U3 probe):**
   Calling `open_browser_page` with a URL already open returns **behavior (a)**:
   VS Code surfaces the existing tab's pageId without opening a duplicate. However
@@ -718,11 +805,13 @@ that design with the agent-driven tool model.
 - No duplicate tab risk — VS Code's own dedup logic handles this (confirmed).
 
 **Patterns to follow:**
+
 - Existing `open_browser_page` registration in `src/tools/page.ts` (post-U2).
 - `extractPageId` in [src/browserBridge.ts:40-48](src/browserBridge.ts#L40-L48)
   for parsing the pageId out of the LM tool result.
 
 **Test scenarios:**
+
 - Happy path: `list_visible_pages` with one externally-opened tab returns one
   entry with the expected URL and `isActive: true`.
 - Happy path: `attach_visible_page` with no arguments and one visible tab
@@ -738,6 +827,7 @@ that design with the agent-driven tool model.
   content.
 
 **Verification:**
+
 - Gate experiment results are documented in `docs/DEVELOPMENT.md`.
 - Manual integration test passes against a live `http://localhost:8080` dev
   server tab opened externally.
@@ -758,6 +848,7 @@ The only reason to await U4 is if `src/tools/_schemas.ts` (lifted from U1) ends
 up holding shared fragments Tier A reuses.
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add `hoverElement`, `dragElement`, `handleDialog`
   wrapper functions. Update `BROWSER_TOOLS` constants.
 - Modify: `src/tools/interaction.ts` — register the three new tools, importing
@@ -765,6 +856,7 @@ up holding shared fragments Tier A reuses.
 - Test: `src/test/extension.test.ts` — assert registration shape only.
 
 **Approach:**
+
 - Before writing the registrations, run the `integratedBrowserMcp.listTools`
   command in the dev host and capture the `inputSchema` for each of the three
   tools from `vscode.lm.tools`. Mirror the schemas in zod.
@@ -778,16 +870,19 @@ up holding shared fragments Tier A reuses.
 - `drag_element` likely takes source/target element references — confirm shape.
 
 **Patterns to follow:**
+
 - Existing `click_element` registration in [src/mcpServer.ts:133-149](src/mcpServer.ts#L133-L149).
 - Existing `clickElement` wrapper in [src/browserBridge.ts:88-94](src/browserBridge.ts#L88-L94).
 
 **Test scenarios:**
+
 - Happy path: each new tool appears in the registered-tool list with the expected
   name and description.
 - Test expectation: behavioral testing against real browser is manual — add
   TC9 (hover), TC10 (drag), TC11 (dialog) to `docs/DEVELOPMENT.md`.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual TC9–TC11 pass against the dev host.
 
@@ -803,6 +898,7 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
 **Dependencies:** U4 (helpers required)
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add `evalJs`, `getDom`, `scroll`, `emulate`
   wrappers. Each builds a `code` string, calls `runPlaywrightCode(pageId, code)`,
   and returns the extracted result.
@@ -815,6 +911,7 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
   shapes for all five.
 
 **Approach:**
+
 - **Code-string assembly rule (applies to all Tier B/C/D/E tools that build
   `run_playwright_code` payloads):** never interpolate raw values directly into
   the code template literal. Pass values through `JSON.stringify(...)` so
@@ -838,7 +935,9 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
   ${JSON.stringify(selector)});`.
 - `scroll` schema: `{ pageId, deltaX?: number, deltaY?: number, x?: number,
   y?: number }`. zod numeric coercion guarantees numbers, but interpolate via
-  `Number(...)` or template-as-number for defense in depth. If absolute `x/y`
+  `Number(...)` or template-as-number for defense in depth. Add `.refine()` to
+  enforce that at least one of `deltaX`, `deltaY`, `x`, or `y` is provided;
+  message: `"scroll requires deltaX/deltaY or x/y"`. If absolute `x/y`
   provided: `window.scrollTo(x, y)`. Otherwise: `window.scrollBy(deltaX ?? 0,
   deltaY ?? 0)`.
 - `emulate` schema: `{ pageId, width: number, height: number }` (zod
@@ -869,10 +968,12 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
   `docs/DEVELOPMENT.md`.
 
 **Patterns to follow:**
+
 - Probe's screenshot + dimensions blocks in
   [src/extension.ts:124-142](src/extension.ts#L124-L142) for the code-string shape.
 
 **Test scenarios:**
+
 - Happy path: `eval_js` registration accepts a `{ pageId, expression }` input.
 - Happy path: `scroll` registration accepts either `{ deltaX, deltaY }` or
   `{ x, y }`.
@@ -885,6 +986,7 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
 - Test expectation for live behavior: manual TC12–TC15 in `docs/DEVELOPMENT.md`.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual: run `eval_js` to get `document.title` on Wikipedia; assert correct title
   returned. Run `emulate` then `screenshot_page` and observe the changed viewport.
@@ -903,6 +1005,7 @@ can pass options Playwright supports but the LM tool does not expose.
 **Dependencies:** U4 (helpers), U8 (touches the same Tier B mechanics)
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — extend `screenshotPage` with optional
   `fullPage`/`waitMs`; branch internally on whether to use the native LM tool or
   `run_playwright_code`. When using `run_playwright_code`, decode the Buffer via
@@ -913,6 +1016,7 @@ can pass options Playwright supports but the LM tool does not expose.
 - Test: `src/test/extension.test.ts` — registration assertions for the new fields.
 
 **Approach:**
+
 - Branching rule: if `fullPage` or `waitMs` is set, use `run_playwright_code`;
   otherwise, keep using the existing LM `screenshot_page` tool (preserves the
   existing `ref`/`selector` element-cropping codepath that the LM tool already
@@ -920,17 +1024,21 @@ can pass options Playwright supports but the LM tool does not expose.
 - The `run_playwright_code` code string (note the `Number()` / `Boolean()`
   coercions follow the code-string assembly rule from U8 — never raw
   interpolation):
+
   ```js
   if (${Number(waitMs) || 0} > 0) { await page.waitForTimeout(${Number(waitMs) || 0}); }
   return await page.screenshot({ type: 'jpeg', quality: 80, fullPage: ${Boolean(fullPage)} });
   ```
+
 - zod schema caps `waitMs` at 30000 (30s) to prevent DoS via indefinite hold.
 
 **Patterns to follow:**
+
 - Probe's screenshot+decode block in
   [src/extension.ts:144-161](src/extension.ts#L144-L161).
 
 **Test scenarios:**
+
 - Happy path: registration includes the two new fields with optional defaults.
 - Edge case: `fullPage` and `waitMs` both omitted → behavior is identical to the
   pre-U9 `screenshot_page` (regression check; same content shape, no extra LM
@@ -940,6 +1048,7 @@ can pass options Playwright supports but the LM tool does not expose.
 - Error path: `waitMs` negative → zod rejects.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual: full-page screenshot of a tall page (Wikipedia article) returns one
   image taller than viewport.
@@ -958,6 +1067,7 @@ the page at a given slice index. Supports Pythonic negative indexing
 **Dependencies:** U4, U8, U9 (consistent with the other visual tools)
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add `screenshotSlice(pageId, slice, width?,
   height?)` wrapper.
 - Modify: `src/tools/visual.ts` — register `screenshot_slice`.
@@ -966,6 +1076,7 @@ the page at a given slice index. Supports Pythonic negative indexing
   and test that).
 
 **Approach:**
+
 - `inputSchema`: `{ pageId, slice: integer, width?: integer, height?: integer }`.
 - Flow:
   1. If `width`/`height` provided: call `runPlaywrightCode(pageId,
@@ -984,9 +1095,11 @@ the page at a given slice index. Supports Pythonic negative indexing
   one JSON unwrap parses both at once.
 
 **Patterns to follow:**
+
 - Probe's slice block in [src/extension.ts:164-191](src/extension.ts#L164-L191).
 
 **Test scenarios:**
+
 - Happy path (pure helper): `normalizeSlice(0, 5)` returns 0; `normalizeSlice(4,
   5)` returns 4; `normalizeSlice(-1, 5)` returns 4; `normalizeSlice(-5, 5)`
   returns 0.
@@ -1002,6 +1115,7 @@ the page at a given slice index. Supports Pythonic negative indexing
   JPEGs; `scrollY` afterwards equals `scrollY` before the call.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual: agent can iterate `slice = 0, 1, 2, ...` until `totalSlices` is hit
   and reconstruct a full-page view.
@@ -1019,12 +1133,14 @@ passed to `run_playwright_code`. No npm dependency.
 **Dependencies:** U4
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add `markdown(pageId, selector?)` wrapper.
 - Modify: `src/tools/content.ts` — register `markdown`.
 - Test: `src/test/extension.test.ts` — registration shape only (in-page JS is
   exercised manually since it depends on a live DOM).
 
 **Approach:**
+
 - `inputSchema`: `{ pageId, selector?: string }`.
 - The in-page JS: a recursive DOM walker. Scope to `document.querySelector(selector)`
   if provided; else `document.querySelector('main') ?? document.body`. Handle:
@@ -1045,6 +1161,7 @@ passed to `run_playwright_code`. No npm dependency.
   content part.
 
 **Test scenarios:**
+
 - Happy path: registration accepts `{ pageId }` and `{ pageId, selector }`.
 - Edge case: `selector` does not match → tool returns empty string with a clear
   text message ("Selector did not match any element").
@@ -1055,6 +1172,7 @@ passed to `run_playwright_code`. No npm dependency.
   and footer elements.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual: render Wikipedia and confirm structure is recognizable markdown.
 
@@ -1073,6 +1191,7 @@ in the tool descriptions.
 **Dependencies:** U2 (clean place for the diagnostic registrar), U4 (helpers)
 
 **Files:**
+
 - Modify: `src/browserBridge.ts` — add `injectConsoleCapture(pageId)`,
   `getConsole(pageId)`, `clearConsole(pageId)` wrappers.
 - Modify: `src/tools/page.ts` — `open_browser_page` handler calls
@@ -1087,17 +1206,13 @@ Vue, Next, Svelte) where interesting console output fires during client-side
 route changes — not full page loads. The mechanism below is decided by a
 spike; both mechanisms must work across SPA navigations.
 
-**Mechanism selection spike (~1 hour, do before implementing):** can a
-Playwright listener registered via `run_playwright_code` survive subsequent
-calls? Test:
-1. Open a page, call `run_playwright_code({ code: 'page.on("console", e =>
-   { (globalThis.__captured ??= []).push(e.text()); });' })`.
-2. Trigger a console event from the page (e.g. via `eval_js`).
-3. In a separate `run_playwright_code` call, read `globalThis.__captured`.
+**Mechanism selection spike — completed (result: Mechanism A not viable):**
+Playwright listeners registered via `run_playwright_code` do NOT persist across
+subsequent calls — each call gets a fresh page context. Mechanism B (in-page
+injection) was taken.
 
-- **If the listener persists (Mechanism A — preferred):** register
-  `page.on('console')` once on `open_browser_page`. Listener captures all
-  console events across navigations natively. Retrieve via subsequent calls.
+- **Mechanism A (listener does not persist — not viable):** ~~register
+  `page.on('console')` once on `open_browser_page`~~.
 - **If the listener doesn't persist (Mechanism B — fallback):** use in-page
   injection PLUS a re-injection trigger. Hook `page.on('framenavigated')`
   via a separate persistent mechanism (if A is impossible, B probably is too —
@@ -1106,6 +1221,7 @@ calls? Test:
   trade-off explicitly.
 
 **Mechanism B injection code (passed to `run_playwright_code`, fallback only):**
+
   ```js
   await page.evaluate(() => {
     if (window.__mcpConsole) return;
@@ -1120,9 +1236,11 @@ calls? Test:
     }
   });
   ```
+
   Every `get_console` call first re-injects (idempotent — the
   `if (window.__mcpConsole) return` guard skips if already present) so SPA
   navigations that wiped `window` get re-hooked transparently.
+
 - `get_console` returns the buffer as a JSON-stringified array in a `text`
   content part. Optional `inputSchema` field `levels?: string[]` filters by
   level (e.g. `['error']`).
@@ -1133,15 +1251,20 @@ calls? Test:
   that neither mechanism reaches. If users need them, that's a follow-up.
 
 **Test scenarios:**
+
 - Happy path: `get_console` registration accepts `{ pageId }` and `{ pageId,
   levels }`.
 - Happy path (manual): open page → `console.log('hello')` from the page's own
   script → `get_console` returns an entry with `level: 'log'` and `args:
   ['hello']`.
-- Edge case: SPA navigation that wipes `window` properties → buffer resets and
-  the limitation is documented; next `console.log` after navigation is captured
-  only if injection runs again. Decision: do *not* re-inject on every navigation
-  in v1 — document it. Re-inject can be added if it becomes a real pain point.
+- Edge case: SPA navigation that wipes `window` properties → **implemented
+  behavior (Mechanism B, spike result: Playwright listener does not persist across
+  `run_playwright_code` calls)**: `get_console` re-injects on every call (the
+  `if (window.__mcpConsole) return` guard is idempotent). SPA navigations that
+  wipe `window` are transparently re-hooked on the next `get_console` call.
+  Document in tool description: "Console events fired between a navigation and
+  the next `get_console` call are not captured." The earlier "do not re-inject"
+  edge case note was aspirational; Mechanism B as shipped IS the re-inject approach.
 - Edge case: `clear_console` empties the buffer; next `get_console` returns `[]`.
 - Error path: injection fails (e.g. CSP blocks inline scripts) → `open_browser_page`
   still returns a valid pageId; the failure is logged but not surfaced. Document
@@ -1150,6 +1273,7 @@ calls? Test:
   → `get_console` filtered to `levels: ['error']` returns just the error entry.
 
 **Verification:**
+
 - `pnpm test` passes.
 - Manual: a page that calls `console.error('boom')` is observed via `get_console`.
 
@@ -1170,6 +1294,7 @@ discipline actually enforceable.
 tool unit (U7 for Tier A, U8 for Tier B, etc.).
 
 **Files:**
+
 - Create: `.github/workflows/test.yml` — runs on `pull_request` and `push` to
   `main`. Linux runner. Steps: `pnpm install`, `pnpm run lint`, `pnpm run
   compile`, `xvfb-run -a pnpm test`.
@@ -1209,13 +1334,15 @@ tool unit (U7 for Tier A, U8 for Tier B, etc.).
   response. Same harness pattern as today.
 
 **Patterns to follow:**
+
 - Existing tests in [src/test/extension.test.ts](src/test/extension.test.ts)
   already use the MCP-client-as-tester pattern.
 - VS Code's own template repo for xvfb-driven Linux CI:
-  https://github.com/microsoft/vscode-extension-samples (any sample with
+  <https://github.com/microsoft/vscode-extension-samples> (any sample with
   `.github/workflows/main.yml` shows the standard pattern).
 
 **Test scenarios:**
+
 - Happy path (workflow itself): the CI job runs `pnpm test` headlessly on a
   push to `main`; passes; exits zero.
 - Happy path (Tier B): `eval_js({ expression: '1 + 1' })` returns a text
@@ -1231,6 +1358,7 @@ tool unit (U7 for Tier A, U8 for Tier B, etc.).
   documents the manual fallback.
 
 **Verification:**
+
 - CI workflow runs green on a representative PR.
 - Each Tier's integration test passes locally with `xvfb-run pnpm test`.
 - A deliberate break in `extractRpcResult` causes at least one integration
@@ -1240,6 +1368,171 @@ tool unit (U7 for Tier A, U8 for Tier B, etc.).
 scaffolding piece (workflow YAML + spike) is independent of every tool unit
 and can ship in Phase 0 alongside the consent spike. The per-Tier integration
 tests then accrue as each Tier's tool unit lands.
+
+---
+
+- U17. **Hybrid CDP layer — replace `run_playwright_code` with `Runtime.evaluate`**
+
+**Goal:** Eliminate the per-unique-script consent dialogs that fire on every Tier B/C/D/E
+tool call. Replace all `runPlaywrightCode()` call sites in `browserBridge.ts` with a CDP
+`Runtime.evaluate` call through a debug session, while keeping all Tier A tools (`open_browser_page`,
+`read_page`, `navigate_page`, `click_element`, `type_in_page`, `hover_element`, `drag_element`,
+`handle_dialog`, standard `screenshot_page`) as-is via `vscode.lm.invokeTool`.
+
+**Requirements:** R2 (the workaround for per-call consent), R11
+
+**Dependencies:** U4 (establishes `runPlaywrightCode` as the single call site to replace),
+all Tier B/C/D/E units (U8–U12) landed; U17 is a drop-in swap beneath them.
+
+**Files:**
+
+- Create: `src/cdp/cdpSession.ts` — exports `CdpSession` class:
+  - `connect(session: vscode.DebugSession): Promise<void>` — calls
+    `session.requestCDPProxy()` to obtain a WebSocket-like message channel. Stores
+    the proxy handle. (`requestCDPProxy` is a VS Code proposed API — the gate
+    experiment must confirm it exists at the project's `^1.112.0` engine target;
+    if it is still proposed, add `"debugSessionCDP"` to `enabledApiProposals` in
+    `package.json`.)
+  - `evaluate(expression: string, awaitPromise?: boolean): Promise<string | undefined>` —
+    sends `Runtime.evaluate` over the proxy; extracts `.result.value` or `.result.description`.
+    Used by: `evalJs`, `getDom`, `scroll`, `markdown`, `getConsole`, `clearConsole`.
+  - `send<T>(method: string, params?: Record<string, unknown>): Promise<T>` — sends an
+    arbitrary CDP domain command (e.g. `Page.captureScreenshot`, `Emulation.setDeviceMetricsOverride`)
+    and returns the typed result. Used by: `screenshotPage`, `screenshotSlice`, `emulate`.
+  - `dispose(): void` — tears down the proxy and clears state.
+- Create: `src/cdp/cdpManager.ts` — exports `CdpManager`:
+  - Manages one `CdpSession` per browser tab (keyed by `pageId`).
+  - `ensureSession(pageId: string): Promise<CdpSession>` — returns an existing session
+    or creates one by finding the matching `DebugSession` via `vscode.debug.activeDebugSession`
+    / `vscode.debug.onDidStartDebugSession`.
+  - `dispose(): void` — disposes all sessions.
+- Modify: `src/browserBridge.ts` — add `setCdpManager(manager: CdpManager): void` setter;
+  replace the body of `runPlaywrightCode(pageId, code)` with:
+
+  ```typescript
+  if (cdpManager) {
+      const session = await cdpManager.ensureSession(pageId);
+      return session.evaluate(code, /* awaitPromise */ true);
+  }
+  // fallback to invokeTool if CDP not yet connected
+  const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code });
+  return extractRpcResult(result);
+  ```
+
+- Modify: `src/extension.ts` — on activation, create `CdpManager` and call
+  `bridge.setCdpManager(manager)` after the MCP server starts. Listen for
+  `vscode.debug.onDidStartDebugSession` to eagerly connect sessions.
+- Modify: `src/mcpServer.ts` — pass `CdpManager` through `ToolContext` so tool
+  registrars can query CDP state for diagnostics (optional; needed only if U4's
+  `parseContract` guard needs updating).
+
+**Approach:**
+
+- **⚠ Gate experiment — run this before writing any U17 code (≈30 min):** Call
+  `open_browser_page` via the MCP tool and simultaneously listen for
+  `vscode.debug.onDidStartDebugSession` in a scratch extension or `extension.ts` log.
+  Record: (1) does the event fire at all for the Simple Browser / Integrated Browser?
+  (2) what is `session.type`? (3) is `requestCDPProxy` a callable method on the
+  resulting `DebugSession` object, or is it `undefined` (proposed API not yet stable
+  at `^1.112.0`)? (4) if proposed, what is the minimum VS Code version that ships it
+  stable, or does it require `"enabledApiProposals": ["debugSessionCDP"]` in
+  `package.json`? (5) **pageId correlation**: inspect `session.configuration` for a
+  `url` / `targetUrl` field; if absent, check whether `session.name` contains the
+  page URL; if neither, test whether the session fires synchronously enough after
+  `open_browser_page` to use timing-based correlation. Document the confirmed strategy
+  before implementing `ensureSession()`. **If (1) is false, U17 needs architectural
+  redesign before Phase 5 starts — do not proceed with the implementation below until
+  the gate passes.** Document results in `docs/DEVELOPMENT.md`.
+- **Browser opening sequence**: `open_browser_page` still handles tab creation (VS Code
+  emits the `pageId` we need for Tier A tools). Separately, listen for
+  `vscode.debug.onDidStartDebugSession` — VS Code fires this when the integrated browser
+  opens a debug session. Match the session's URL to the active page (exact matching
+  strategy determined by gate experiment result). Use `session.requestCDPProxy()` to
+  obtain the CDP proxy handle.
+- **Fallback**: if no debug session is available (e.g. VS Code opened the tab without
+  launching a debug session), `runPlaywrightCode` falls back to `invokeTool`. On the
+  first fallback call, log a warning to the VS Code output channel:
+  `'[mcp-browser] CDP session unavailable — falling back to invokeTool; consent dialogs may appear'`.
+  This makes the degraded state visible to developers without breaking the agent. No
+  regression vs. today for end users.
+- **`requestCDPProxy` vs. `customRequest`**: thimo's code shows that `requestCDPProxy`
+  is available on child debug sessions (not the root launcher session). The `onDidStartDebugSession`
+  listener must distinguish between root and child sessions — use the session's `parentSession`
+  property (`undefined` = root, set = child). Connect only to child sessions.
+- **No `argv.json` changes needed**: `vscode.debug.startDebugging` (type: `editor-browser`)
+  is the debug-session path; it does not require `--remote-debugging-port`. Zero user setup.
+- **Code string audit (required pre-implementation step, owned by U17):** Before writing
+  any CDP wiring, audit every `runPlaywrightCode` call site in `src/browserBridge.ts`
+  for `page.*` API usage. Classify each occurrence as: (a) zero-arg `page.evaluate()` —
+  strip wrapper; (b) `page.evaluate(fn, arg)` — inline arg via `JSON.stringify`; (c)
+  non-evaluate Playwright API (`page.screenshot`, `page.viewportSize`, `page.waitForTimeout`,
+  `page.close`) — requires a separate CDP `send()` command or exception. Document the
+  classification in a comment above each rewrite. This audit is U17's first implementation
+  step, before any `CdpSession` code is written.
+- **`parseContractGuard` decision:** After U17 ships, `parseContractGuard` only fires when
+  CDP is unavailable and the fallback `invokeTool` path is used. U17 should explicitly
+  decide: remove `parseContractGuard` from the Tier B/C/D/E CDP call sites and retain it
+  only in the fallback branch, or keep it on all paths. Recommended: remove from CDP path
+  (guard protects `extractRpcResult` parsing which only runs in the fallback), retain in
+  fallback `invokeTool` branch to preserve the diverged-format detection for that path.
+- **Code string pass-through**: CDP `Runtime.evaluate` accepts arbitrary JS. The `code`
+  strings built by `evalJs`, `getDom`, `markdown`, etc. pass unchanged — they are already
+  valid JS. Playwright-specific APIs (`page.*`) are NOT available in the CDP context;
+  all existing `runPlaywrightCode` code strings must be audited and rewritten to use
+  plain browser JS (`window.scrollBy`, `document.querySelector`, etc.). See sub-tasks below.
+- **Playwright-to-browser-JS migration** (required before U17 can ship):
+  - `closePage`: stays on the `invokeTool` path — `page.close()` is a Playwright
+    server-side API with no `Runtime.evaluate` equivalent (`window.close()` is a no-op
+    on VS Code WebView tabs not opened by script). One consent dialog per VS Code session
+    is acceptable for a rarely-called tool.
+  - `screenshotPage` (fullPage): `page.screenshot(...)` → use `Page.captureScreenshot`
+    CDP command directly (not via evaluate) — call `cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 80 })` and decode the base64 `data` field.
+  - `screenshotSlice`: `Page.captureScreenshot` via `send()` + scroll via evaluate.
+    Additional rewrites needed in the code string: `page.viewportSize()` →
+    `{ width: window.innerWidth, height: window.innerHeight }`; `page.waitForTimeout(N)` →
+    `await new Promise(r => setTimeout(r, N))`. Scroll-restore `finally` must be issued
+    as a separate `evaluate()` call from the TypeScript caller (not inside the code string)
+    since the screenshot `send()` is a separate round-trip that breaks atomicity.
+  - `emulate`: `page.setViewportSize(...)` → `Emulation.setDeviceMetricsOverride` CDP command via `send()`.
+  - `getDom`: uses `page.evaluate(sel => ..., JSON.stringify(selector))` — argument-passing
+    pattern. Rewrite as self-contained IIFE: `(function(){ const sel = ${JSON.stringify(selector ?? null)}; return sel ? document.querySelector(sel)?.outerHTML ?? '' : document.documentElement.outerHTML; })()`.
+  - `markdown`: same arg-passing pattern — inline the selector value via `JSON.stringify`
+    into a self-contained IIFE. See getDom for the pattern.
+  - `getConsole` / `CONSOLE_INJECT`: `CONSOLE_INJECT` uses `await page.evaluate(() => {...})` —
+    not a bare JS string. Rewrite as a self-contained IIFE:
+    `(function(){ if(window.__mcpConsole) return; ... })()`. `getConsole` then becomes
+    two sequential `evaluate()` calls: (1) inject, (2) read buffer.
+  - `clearConsole`, `scroll`, `evalJs`: zero-arg `page.evaluate()` wrappers — strip the
+    wrapper and pass the inner function body directly to `Runtime.evaluate`.
+- **Error mapping**: `Runtime.evaluate` returns `{ exceptionDetails }` on error. Map to the
+  same `isError: true` MCP envelope that `errContent()` produces.
+
+**Patterns to follow:**
+
+- thimo's `CDPTab.connectToSession` and `CDPTab.send` in `src/cdp-tab.ts` for the
+  `requestCDPProxy` / WebSocket message pattern.
+- thimo's `CDPManager.adoptDebugSession` for the debug-session listener pattern.
+- Existing `runPlaywrightCode` in [src/browserBridge.ts](src/browserBridge.ts) as the
+  single call site being replaced.
+
+**Test scenarios:**
+
+- Unit: `CdpSession.evaluate` with a mocked proxy returns the correct `.result.value`.
+- Unit: fallback path fires `invokeTool` when `cdpManager` is `undefined`.
+- Integration (tier-b): `eval_js` via CDP returns `"2"` for `1+1` — no consent dialog.
+- Integration (tier-c): `screenshot_page` fullPage path returns valid JPEG bytes via
+  `Page.captureScreenshot`.
+- Integration (tier-d): `markdown` via CDP returns `# Hello` after injecting `<h1>`.
+- Integration (tier-e): `get_console` captures `console.log("boom")` via CDP evaluate.
+
+**Verification:**
+
+- `pnpm test` passes.
+- Manual session: open a page, run `eval_js` → **zero consent dialogs** after initial
+  Tier A approval.
+- Output channel logs `[cdp] connected to session <id>` on first use.
+- `docs/DEVELOPMENT.md` `## Permission dialog scope` section updated: Tier B/C/D/E
+  row changed from "consent per unique script" to "no consent (CDP path)".
 
 ---
 
@@ -1256,6 +1549,7 @@ probe's role.
 supersedes the probe's experimental code path)
 
 **Files:**
+
 - Modify: `src/extension.ts` — delete the `probeScreenshotSlice` command and its
   helper block. Remove the now-unused `extractRpcResult` local copy (it lives in
   `browserBridge.ts` since U4).
@@ -1271,6 +1565,7 @@ supersedes the probe's experimental code path)
   the DevTools console. Don't pass untrusted input."*
 
 **Approach:**
+
 - Confirm no other code path imports anything from the probe block before
   deletion.
 - The new doc section is ~30 lines: it explains the agent-driven workflow,
@@ -1278,13 +1573,16 @@ supersedes the probe's experimental code path)
   at U4's tests as the reference shape examples.
 
 **Patterns to follow:**
+
 - Existing "Manual integration tests" section in `docs/DEVELOPMENT.md` for the
   doc voice.
 
 **Test scenarios:**
+
 - Test expectation: none — pure deletion + doc update.
 
 **Verification:**
+
 - `pnpm test` passes after the deletion.
 - `grep -r probeScreenshotSlice src/ package.json` returns no matches.
 - `docs/DEVELOPMENT.md` includes the new section.
@@ -1304,8 +1602,9 @@ here for execution.
 **Dependencies:** U2 (clean home for handler code); independent of all tool units
 
 **Files:**
+
 - Create: `src/install/elementSelector.ts` — picker invocation + payload assembly
-  + SSE broadcast to subscribed sessions.
+  - SSE broadcast to subscribed sessions.
 - Modify: `src/mcpServer.ts` — expose a `broadcastToSubscribers(notification)`
   method on `McpBridgeServer` that iterates a `Set<sessionId>` subscriber set
   and calls `transport.send(notification)` for each. `SessionEntry` gains a
@@ -1320,6 +1619,7 @@ here for execution.
   a `when` clause scoped to the Integrated Browser's `viewType`.
 
 **Approach:**
+
 - **Gate first.** Run `vscode.commands.getCommands(true)` once during U14 work
   and grep for `browser.*pick*`, `browser.*inspect*`, `editor.action.inspectTM*`,
   and anything else that looks like an element picker. Document the findings in
@@ -1337,6 +1637,7 @@ here for execution.
     significant scope outside the bounds of this plan.
 - **Broadcast plumbing:** a notification is a JSON-RPC message with no `id` and
   a `method` like `"notifications/elements/selected"`. Body shape:
+
   ```
   {
     "method": "notifications/elements/selected",
@@ -1350,6 +1651,7 @@ here for execution.
     }
   }
   ```
+
 - **Path A interop prerequisite (gate experiment, ~30 minutes, do this before
   designing the picker UX):** the broadcast assumes `transport.send()` actually
   reaches a connected Claude Code session. `StreamableHTTPServerTransport`'s
@@ -1396,6 +1698,7 @@ B ships. Capture the gate outcome in `docs/DEVELOPMENT.md` regardless of which
 path lands.
 
 **Patterns to follow:**
+
 - Prior plan U8 design notes in
   [docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md](docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md)
   (lines ~741-797).
@@ -1403,6 +1706,7 @@ path lands.
   `GET /mcp` SSE channel is already wired up — confirmed by prior U2).
 
 **Test scenarios:**
+
 - Happy path (manual, Path A): with a Claude Code session active, click an
   element in the browser → Claude Code receives a notification with the element
   data.
@@ -1412,6 +1716,7 @@ path lands.
   registered and the broadcast plumbing still works.
 
 **Verification:**
+
 - Manual: click → Claude Code session log shows the inbound notification with
   the expected payload shape.
 
@@ -1430,6 +1735,7 @@ listed under "Deferred to Follow-Up Work" in the prior plan and is now in scope.
 registry interacts with the Claude Code config decision)
 
 **Files:**
+
 - Modify: `src/mcpServer.ts` — when the configured port is in use, retry once
   with port `0` (OS-assigned) and log the actual bound port.
 - Create: `src/install/portRegistry.ts` — `registerInstance(port): Disposable`
@@ -1446,11 +1752,13 @@ registry interacts with the Claude Code config decision)
   and the multi-window UX.
 
 **Approach:**
+
 - **Registry file location:**
   - Linux/macOS: `~/.claude/integrated-browser-mcp-instances.json` (under the
     `.claude` dir so it sits next to Claude Code's own state).
   - Windows: `%APPDATA%\Claude\integrated-browser-mcp-instances.json`.
 - **File format:**
+
   ```json
   {
     "instances": [
@@ -1464,6 +1772,7 @@ registry interacts with the Claude Code config decision)
     ]
   }
   ```
+
   `appName` comes from `vscode.env.appName` (e.g. `"Visual Studio Code"` for
   Stable, `"Visual Studio Code - Insiders"` for Insiders). This lets the U5
   picker UI disambiguate when Stable and Insiders run side-by-side — common
@@ -1492,6 +1801,7 @@ registry interacts with the Claude Code config decision)
   `docs/DEVELOPMENT.md`.
 
 **Approach interaction with U5 (auto-register):**
+
 - If the user has only one window running, U5's behavior is unchanged: write
   `{ url: http://127.0.0.1:<port>/mcp }` to `~/.claude.json`.
 - If multiple instances are detected at U5 prompt time, use
@@ -1515,6 +1825,7 @@ registry interacts with the Claude Code config decision)
   instances do *not* overwrite the config.
 
 **Test scenarios:**
+
 - Happy path: first window binds 3100; second window EADDRINUSE → falls back
   to port 0 → registry shows both entries with distinct ports.
 - Edge case: first window closes cleanly → its entry is removed; second
@@ -1532,6 +1843,7 @@ registry interacts with the Claude Code config decision)
   that window independently.
 
 **Verification:**
+
 - Open two VS Code windows in the dev host. Both servers start. Registry file
   contains two entries with the right ports. Closing one removes its entry.
 
@@ -1571,7 +1883,7 @@ registry interacts with the Claude Code config decision)
 
 | Risk | Mitigation |
 |------|------------|
-| VS Code 1.112–1.120 offers no pre-authorization mechanism for `invokeTool` → consent prompts remain per-call. | U3 documents the finding and the structural workaround (route work through `run_playwright_code`) is already the plan's architectural posture. Worst case: UX no worse than today. |
+| `run_playwright_code` consent caches per unique script content, not per tool — every distinct Tier B/C/D/E call triggered a dialog. | U17 replaces all `run_playwright_code` calls with CDP `Runtime.evaluate`, eliminating script-execution dialogs. Tier A one-time dialogs (~5–6 at session start) remain. |
 | VS Code emits no event for externally-opened tabs → page adoption (U6) falls back to polling. | U6 acceptance is "passive registration" — polling at a coarse interval (2s) is acceptable. Push notifications are explicitly deferred. |
 | Adopted `pageId`s (U6) cannot drive `vscode.lm.invokeTool` because VS Code's tools require *their* page identifier. | Investigation step in U6 verifies this before scope-locking. If true, U6 ships as "advertise the URL in `list_pages`" and tool calls return a clear error for adopted pages. |
 | `run_playwright_code` Result-string parsing breaks in a future VS Code update. | The probe command stays in until U13 (after Tiers A–E land); helper tests in U4 lock the parse contract. If VS Code changes the shape, only one helper needs updating. |
@@ -1627,7 +1939,9 @@ U6 gate (discovered during U3 probe) — **partially complete.** `open_browser_p
 called on an already-open URL returns the existing tab's pageId (behavior a, no
 duplicate). Response format is `[pageId] Title (URL) (active)` — different from
 the happy-path `Page ID: <uuid>`. `extractPageId` must be extended in U6.
-`tabGroups` enumeration for `list_visible_pages` still needs a manual check.
+`tabGroups` enumeration — **resolved during U6 implementation**: `vscode.window.tabGroups.all`
+correctly yields `TabInputWebview` entries with `viewType === 'simpleBrowser.view'` for
+integrated browser tabs. `enumerateVisibleBrowserTabs()` ships in `src/browserBridge.ts`.
 
 U16 CI scaffolding spike — **complete (2026-05-19).** `.github/workflows/test.yml`
 ships; `xvfb-run -a pnpm test` runs clean on every push. 18/18 tests pass,
@@ -1664,16 +1978,34 @@ when the tool units land.
 - U12 — `get_console`/`clear_console` in `src/tools/diagnostic.ts`; Mechanism B (in-page injection via `page.evaluate`, idempotent re-inject on every `get_console`); auto-inject fire-and-forget in `open_browser_page`; 44 tests passing
 - U16 — `src/test/integration/tier-b.test.ts` (eval_js), `tier-c.test.ts` (screenshot_page), `tier-d.test.ts` (markdown), `tier-e.test.ts` (get_console); shared `_helpers.ts` McpTestClient on port 3198; graceful skip when browser unavailable; DEVELOPMENT.md CI section added
 
-### ▶ NEXT: Phase 5 — U14, U15
+### ▶ NEXT: Phase 5 — U17 (hybrid CDP), then U14, U15
 
 ### Phase 5 — Cross-cutting features
-- U14 (element selection push) — depends on U2; investigation-led
+
+**Pre-flight gates (run before implementing the units they gate):**
+
+1. **U17 gate** (≈30 min, blocks all U17 code): Verify `onDidStartDebugSession` fires for
+   the integrated browser, confirm `requestCDPProxy` is callable, and determine the
+   `DebugSession→pageId` correlation strategy. See U17 Approach for the full checklist.
+2. **U14 gate** (≈30 min, blocks U14 architecture): Start a real Claude Code session, fire a
+   no-op `transport.send()`, and confirm receipt. If Claude Code does not hold the `GET /mcp`
+   SSE stream open, U14 must be redesigned as a pull/polling model (`get_element_selection`
+   tool) before any broadcast plumbing is written.
+
+- U17 (hybrid CDP — replace `run_playwright_code` with `Runtime.evaluate`) — eliminates
+  per-unique-script consent dialogs; depends on all Tier B/C/D/E units (U8–U12); ships first
+- U14 (element selection push) — depends on U2; investigation-led; **run gate 2 first**
 - U15 (multi-window support) — depends on U2, U5
 
-Both are substantial. They can ship in either order; both interact only lightly
-with Phase 4 work.
+U17 is highest priority — it unblocks real-world usability. U14 and U15 can follow in either order.
+
+**Release note:** Do not cut a release with Phase 4 tools (U8–U12) without U17. As shipped,
+every Tier B/C/D/E tool call with a distinct code string triggers a consent dialog. U17 is
+the fix; releasing Phase 4 without Phase 5 means users experience maximum dialog friction
+on the new tool surface. Treat Phases 4+5 as a single release unit.
 
 ### Phase 6 — Cleanup
+
 - U13 (remove probe, refresh docs)
 
 Lands last, after every Phase 4 and Phase 5 unit is merged.

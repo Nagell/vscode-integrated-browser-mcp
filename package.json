@@ -44,6 +44,21 @@
         "title": "Integrated Browser MCP: Probe Screenshot Slice + Emulate (debug)"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "browser_screenshot",
+        "tags": ["browser", "screenshot"],
+        "displayName": "Browser Screenshot",
+        "modelDescription": "Takes a JPEG screenshot of the currently open VS Code Integrated Browser page. Requires a pageId from open_browser_page.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageId": { "type": "string", "description": "Page ID returned by open_browser_page" }
+          },
+          "required": ["pageId"]
+        }
+      }
+    ],
     "configuration": {
       "title": "Integrated Browser MCP",
       "properties": {
