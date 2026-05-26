@@ -1968,7 +1968,7 @@ when the tool units land.
 - U5 — `src/install/claudeConfig.ts`: symlink-safe, atomic write, globalState-gated auto-register; 9 new merge/idempotency tests
 - U6 — `list_visible_pages` + `attach_visible_page` in `src/tools/page.ts`; `extractPageId` extended for "already open" UUID format; `enumerateVisibleBrowserTabs()` via `tabGroups`
 
-### ~~Phase 4 — Tools (fans out)~~ — partial (2026-05-20)
+### ~~Phase 4 — Tools (fans out)~~ — complete (2026-05-20)
 
 - U7 — `hover_element`, `drag_element`, `handle_dialog` in `src/tools/interaction.ts`; `hoverElement`, `dragElement`, `handleDialog` wrappers in `browserBridge.ts`
 - U8 — `eval_js`, `get_dom` in `src/tools/content.ts`; `scroll` in `src/tools/interaction.ts`; `emulate` in `src/tools/visual.ts`; `get_url` in `src/tools/page.ts`; `parseContractGuard` helper in `src/util/mcpResult.ts`; 18 tools total
