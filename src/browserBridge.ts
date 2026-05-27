@@ -96,10 +96,10 @@ export interface OpenPageResult {
 }
 
 export async function openBrowserPage(url?: string, forceNew?: boolean): Promise<OpenPageResult> {
-    const input: Record<string, unknown> = {};
-    if (url) { input.url = url; }
-    if (forceNew) { input.forceNew = true; }
-    const result = await invoke(BROWSER_TOOLS.openBrowserPage, input);
+    const result = await invoke(BROWSER_TOOLS.openBrowserPage, {
+        ...(url ? { url } : {}),
+        ...(forceNew ? { forceNew: true } : {}),
+    });
     const pageId = extractPageId(result);
     if (!pageId) {
         throw new Error('open_browser_page did not return a Page ID');
@@ -146,27 +146,29 @@ export async function screenshotPage(pageId: string, ref?: string, selector?: st
         const b64 = Buffer.from(bytes).toString('base64');
         return [{ type: 'image', data: b64, mimeType: 'image/jpeg' }];
     }
-    const input: Record<string, unknown> = { pageId };
-    if (ref) { input.ref = ref; }
-    if (selector) { input.selector = selector; }
-    const result = await invoke(BROWSER_TOOLS.screenshotPage, input);
+    const result = await invoke(BROWSER_TOOLS.screenshotPage, {
+        pageId,
+        ...(ref ? { ref } : {}),
+        ...(selector ? { selector } : {}),
+    });
     return resultToMcp(result);
 }
 
 export async function navigatePage(pageId: string, type?: string, url?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId };
-    if (type) { input.type = type; }
-    if (url) { input.url = url; }
-    const result = await invoke(BROWSER_TOOLS.navigatePage, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.navigatePage, {
+        pageId,
+        ...(type ? { type } : {}),
+        ...(url ? { url } : {}),
+    }));
 }
 
 export async function clickElement(pageId: string, element: string, ref?: string, selector?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId, element };
-    if (ref) { input.ref = ref; }
-    if (selector) { input.selector = selector; }
-    const result = await invoke(BROWSER_TOOLS.clickElement, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.clickElement, {
+        pageId,
+        element,
+        ...(ref ? { ref } : {}),
+        ...(selector ? { selector } : {}),
+    }));
 }
 
 export async function closePage(pageId: string): Promise<McpContent[]> {
@@ -176,11 +178,12 @@ export async function closePage(pageId: string): Promise<McpContent[]> {
 }
 
 export async function hoverElement(pageId: string, element: string, ref?: string, selector?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId, element };
-    if (ref) { input.ref = ref; }
-    if (selector) { input.selector = selector; }
-    const result = await invoke(BROWSER_TOOLS.hoverElement, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.hoverElement, {
+        pageId,
+        element,
+        ...(ref ? { ref } : {}),
+        ...(selector ? { selector } : {}),
+    }));
 }
 
 export async function dragElement(
@@ -193,31 +196,34 @@ export async function dragElement(
     targetSelector?: string
 ): Promise<McpContent[]> {
     // VS Code's drag_element uses from*/to* naming, not source*/target*
-    const input: Record<string, unknown> = { pageId, fromElement: sourceElement, toElement: targetElement };
-    if (sourceRef) { input.fromRef = sourceRef; }
-    if (targetRef) { input.toRef = targetRef; }
-    if (sourceSelector) { input.fromSelector = sourceSelector; }
-    if (targetSelector) { input.toSelector = targetSelector; }
-    const result = await invoke(BROWSER_TOOLS.dragElement, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.dragElement, {
+        pageId,
+        fromElement: sourceElement,
+        toElement: targetElement,
+        ...(sourceRef ? { fromRef: sourceRef } : {}),
+        ...(targetRef ? { toRef: targetRef } : {}),
+        ...(sourceSelector ? { fromSelector: sourceSelector } : {}),
+        ...(targetSelector ? { toSelector: targetSelector } : {}),
+    }));
 }
 
 export async function handleDialog(pageId: string, action: 'accept' | 'dismiss', text?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId, acceptModal: action === 'accept' };
-    if (text !== undefined) { input.text = text; }
-    const result = await invoke(BROWSER_TOOLS.handleDialog, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.handleDialog, {
+        pageId,
+        acceptModal: action === 'accept',
+        ...(text !== undefined ? { text } : {}),
+    }));
 }
 
 export async function typeInPage(pageId: string, text?: string, key?: string, ref?: string, selector?: string, element?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId };
-    if (text) { input.text = text; }
-    if (key) { input.key = key; }
-    if (ref) { input.ref = ref; }
-    if (selector) { input.selector = selector; }
-    if (element) { input.element = element; }
-    const result = await invoke(BROWSER_TOOLS.typeInPage, input);
-    return resultToMcp(result);
+    return resultToMcp(await invoke(BROWSER_TOOLS.typeInPage, {
+        pageId,
+        ...(text ? { text } : {}),
+        ...(key ? { key } : {}),
+        ...(ref ? { ref } : {}),
+        ...(selector ? { selector } : {}),
+        ...(element ? { element } : {}),
+    }));
 }
 
 // Extracts the `Result:` value from a run_playwright_code response, unwrapping one level
