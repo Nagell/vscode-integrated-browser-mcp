@@ -947,7 +947,12 @@ up holding shared fragments Tier A reuses.
   against a captured snapshot.
 - `handle_dialog` likely takes `{ pageId, action: 'accept' | 'dismiss', text?:
   string }` — confirm before implementing.
+  **Confirmed (2026-05-28):** VS Code uses `acceptModal: boolean`, not `action`.
+  Bridge translates `action === 'accept'` → `acceptModal`. MCP schema keeps `action`.
 - `drag_element` likely takes source/target element references — confirm shape.
+  **Confirmed (2026-05-28):** VS Code uses `fromElement`/`fromRef`/`fromSelector`/
+  `toElement`/`toRef`/`toSelector`. Bridge translates from `source*`/`target*` MCP
+  names to `from*`/`to*` VS Code names.
 
 **Patterns to follow:**
 
@@ -1293,6 +1298,14 @@ spike; both mechanisms must work across SPA navigations.
 Playwright listeners registered via `run_playwright_code` do NOT persist across
 subsequent calls — each call gets a fresh page context. Mechanism B (in-page
 injection) was taken.
+
+**⚠ Correction (2026-05-28 — confirmed by manual tool tour):** Mechanism B is
+also non-functional on the `run_playwright_code` fallback path. `window.__mcpConsole`
+set via `page.evaluate()` in one `run_playwright_code` call is NOT visible to a
+subsequent call — the JS heap does not persist across separate LM-tool invocations
+(confirmed: `get_console` always returns `[]` without CDP). **`get_console` /
+`clear_console` only work correctly when CDP (U17) is active.** The invokeTool
+fallback path should document this limitation explicitly in the tool description.
 
 - **Mechanism A (listener does not persist — not viable):** ~~register
   `page.on('console')` once on `open_browser_page`~~.

@@ -192,17 +192,18 @@ export async function dragElement(
     sourceSelector?: string,
     targetSelector?: string
 ): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId, sourceElement, targetElement };
-    if (sourceRef) { input.sourceRef = sourceRef; }
-    if (targetRef) { input.targetRef = targetRef; }
-    if (sourceSelector) { input.sourceSelector = sourceSelector; }
-    if (targetSelector) { input.targetSelector = targetSelector; }
+    // VS Code's drag_element uses from*/to* naming, not source*/target*
+    const input: Record<string, unknown> = { pageId, fromElement: sourceElement, toElement: targetElement };
+    if (sourceRef) { input.fromRef = sourceRef; }
+    if (targetRef) { input.toRef = targetRef; }
+    if (sourceSelector) { input.fromSelector = sourceSelector; }
+    if (targetSelector) { input.toSelector = targetSelector; }
     const result = await invoke(BROWSER_TOOLS.dragElement, input);
     return resultToMcp(result);
 }
 
 export async function handleDialog(pageId: string, action: 'accept' | 'dismiss', text?: string): Promise<McpContent[]> {
-    const input: Record<string, unknown> = { pageId, action };
+    const input: Record<string, unknown> = { pageId, acceptModal: action === 'accept' };
     if (text !== undefined) { input.text = text; }
     const result = await invoke(BROWSER_TOOLS.handleDialog, input);
     return resultToMcp(result);
