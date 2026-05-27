@@ -1,25 +1,31 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from './mcpServer.js';
 import * as bridge from './browserBridge.js';
+import { CdpManager } from './cdp/cdpManager.js';
 import { ensureClaudeMcpEntry } from './install/claudeConfig.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
 
-// Fire-and-forget: verifies the run_playwright_code response shape hasn't changed.
-// At activation time there is usually no open page, so 'unverified' is the common outcome.
+// Dev-only: verifies the invokeTool fallback response shape hasn't changed.
+// Only runs in Extension Development Host. At activation time there is usually no open
+// page, so 'unverified' is the common outcome — the probe catches the real format change
+// if VS Code updates its run_playwright_code response envelope.
 function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
-    bridge.runPlaywrightCode('', 'return 42;').then(value => {
-        if (value === '42') {
+    bridge.runPlaywrightCode('', 'return "invokeTool-ok";').then(value => {
+        if (value === 'invokeTool-ok') {
             s.parseContract.status = 'ok';
-            out.appendLine('[startup] parse probe: ok');
+            out.appendLine('[startup] parse probe: ok — invokeTool fallback format unchanged');
         } else if (value !== undefined) {
             s.parseContract.status = 'diverged';
-            s.parseContract.details = `Expected "42", got: ${value.slice(0, 100)}`;
+            s.parseContract.details = `Expected "invokeTool-ok", got: ${value.slice(0, 100)}`;
             out.appendLine(`[startup] parse probe: DIVERGED — ${s.parseContract.details}`);
             vscode.window.showErrorMessage(
                 'Integrated Browser MCP: VS Code response format may have changed. ' +
-                'Tools relying on run_playwright_code will return errors. ' +
+                'The invokeTool fallback path may return errors. ' +
                 'Please update the extension or report the issue.',
                 'Open Issue'
             ).then(choice => {
@@ -34,20 +40,64 @@ function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
     });
 }
 
+// Resolves the Windows-side argv.json path. In WSL, VS Code reads the Windows user's file,
+// not the Linux one. Uses USERPROFILE / HOMEDRIVE+HOMEPATH env vars exposed by WSL interop.
+function resolveWindowsArgvPath(): string {
+    const toWsl = (p: string) => p
+        .replace(/^([A-Za-z]):[/\\]/, (_, d: string) => `/mnt/${d.toLowerCase()}/`)
+        .replace(/\\/g, '/');
+    if (process.env.USERPROFILE) {
+        return path.join(toWsl(process.env.USERPROFILE), '.vscode', 'argv.json');
+    }
+    if (process.env.HOMEDRIVE && process.env.HOMEPATH) {
+        return path.join(toWsl(`${process.env.HOMEDRIVE}${process.env.HOMEPATH}`), '.vscode', 'argv.json');
+    }
+    return path.join(os.homedir(), '.vscode', 'argv.json');
+}
+
+function parseArgvJson(raw: string): Record<string, unknown> {
+    return JSON.parse(raw.replace(/\/\/[^\n]*/g, '')) as Record<string, unknown>;
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
     server = new McpBridgeServer(output);
 
+    const isDev = context.extensionMode === vscode.ExtensionMode.Development;
     const cfg = vscode.workspace.getConfiguration('integratedBrowserMcp');
-    const port: number = cfg.get('port') ?? 3100;
+    // cfg.get('port') resolves the schema default (3100) even when not explicitly set,
+    // so use inspect() to distinguish user-configured values from the schema default.
+    const portInspect = cfg.inspect<number>('port');
+    const userPort = portInspect?.globalValue ?? portInspect?.workspaceValue ?? portInspect?.workspaceFolderValue;
+    const port: number = userPort ?? (isDev ? 3101 : 3100);
     const autoStart: boolean = cfg.get('autoStart') ?? true;
+    const serverName = isDev ? 'integratedBrowser-dev' : 'integratedBrowser';
+
+    // Wire CDP if VS Code proposed browser API is available
+    const win = vscode.window as unknown as Record<string, unknown>;
+    if (typeof win['browserTabs'] !== 'undefined') {
+        const manager = new CdpManager(output);
+        bridge.setCdpManager(manager);
+        context.subscriptions.push({ dispose: () => manager.dispose() });
+        const onOpen = win['onDidOpenBrowserTab'] as ((listener: () => void) => vscode.Disposable) | undefined;
+        if (onOpen) {
+            context.subscriptions.push(
+                (onOpen as (...args: unknown[]) => vscode.Disposable).call(vscode.window, () => {
+                    output?.appendLine('[cdp] browser tab opened externally');
+                })
+            );
+        }
+        output.appendLine('[cdp] proposed browser API detected — CDP mode active');
+    } else {
+        output.appendLine('[cdp] proposed browser API not available — using invokeTool fallback (consent dialogs will appear)');
+    }
 
     if (autoStart) {
         try {
             await server.start(port);
             output.appendLine(`MCP server started on http://127.0.0.1:${port}/mcp`);
-            runParseProbe(server, output);
-            ensureClaudeMcpEntry(context, output, port).catch(err => {
+            if (isDev) { runParseProbe(server, output); }
+            ensureClaudeMcpEntry(context, output, port, serverName).catch(err => {
                 output?.appendLine(`[claudeConfig] unexpected error: ${err}`);
             });
         } catch (err) {
@@ -99,169 +149,50 @@ export async function activate(context: vscode.ExtensionContext) {
             ch.show();
         }),
 
-        vscode.commands.registerCommand('integratedBrowserMcp.probeScreenshotSlice', async () => {
-            const ch = getDebugChannel();
-            ch.show();
-            ch.appendLine('\n=== Probe: screenshot slice + emulate ===');
-            const cts = new vscode.CancellationTokenSource();
+        vscode.commands.registerCommand('integratedBrowserMcp.enableCdp', async () => {
+            const argvPath = resolveWindowsArgvPath();
+            const extId = 'Nagell.vscode-integrated-browser-mcp';
 
-            // Extract the value from run_playwright_code TextPart.
-            // VS Code wraps returned values as: Result: <value>\nPage Title: ...
-            // When the value is a quoted JSON string: Result: "..."
-            // When the value is an object: Result: {...}
-            function extractRpcResult(parts: readonly (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart | unknown)[]): string | undefined {
-                for (const part of parts) {
-                    if (part instanceof vscode.LanguageModelTextPart) {
-                        const m = part.value.match(/^Result:\s*([\s\S]+?)(?:\nPage Title:|$)/);
-                        if (m) { return m[1].trim(); }
-                    }
+            let existing: Record<string, unknown> = {};
+            try {
+                existing = parseArgvJson(fs.readFileSync(argvPath, 'utf-8'));
+            } catch (err) {
+                if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                    void vscode.window.showErrorMessage(`Integrated Browser MCP: could not read argv.json — ${(err as Error).message}`);
+                    return;
                 }
-                return undefined;
             }
 
+            const current = Array.isArray(existing['enable-proposed-api'])
+                ? (existing['enable-proposed-api'] as string[])
+                : [];
+            if (current.includes(extId)) {
+                void vscode.window.showInformationMessage('Integrated Browser MCP: CDP is already enabled. Restart VS Code if dialogs still appear.');
+                return;
+            }
+
+            const choice = await vscode.window.showInformationMessage(
+                'Enable dialog-free browser tools? This adds "enable-proposed-api" to your VS Code argv.json and requires a restart.',
+                'Enable',
+                'Cancel'
+            );
+            if (choice !== 'Enable') { return; }
+
+            const merged = { ...existing, 'enable-proposed-api': [...current, extId] };
+            const tmpPath = `${argvPath}.tmp-${process.pid}`;
             try {
-                // 1. Open page — print raw text to confirm pageId format
-                ch.appendLine('\n[1] open_browser_page — raw output to confirm format');
-                const openResult = await vscode.lm.invokeTool('open_browser_page', { input: { url: 'https://en.wikipedia.org/wiki/JavaScript' }, toolInvocationToken: undefined }, cts.token);
-                for (const part of openResult.content) {
-                    if (part instanceof vscode.LanguageModelTextPart) { ch.appendLine(`  RAW: ${part.value.slice(0, 400)}`); }
-                }
-                // Try both formats
-                const rawText = openResult.content.find((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart)?.value ?? '';
-                const pageId = rawText.match(/Page ID:\s*(\S+)/)?.[1] ?? rawText.match(/pageId:\s*(\S+)/)?.[1];
-                ch.appendLine(`  pageId (matched): ${pageId}`);
-                ch.appendLine(`  format used: ${rawText.match(/Page ID:/) ? '"Page ID:"' : rawText.match(/pageId:/) ? '"pageId:"' : 'UNKNOWN'}`);
-                if (!pageId) { ch.appendLine('ERROR: no pageId — cannot continue'); return; }
-
-                // 2. Emulate: set viewport
-                ch.appendLine('\n[2] run_playwright_code -> setViewportSize(1280, 800)');
-                const emulateResult = await vscode.lm.invokeTool('run_playwright_code', {
-                    input: { pageId, code: 'await page.setViewportSize({ width: 1280, height: 800 });' },
-                    toolInvocationToken: undefined
-                }, cts.token);
-                ch.appendLine(`  result: ${extractRpcResult(emulateResult.content) ?? '(no result value)'}`);
-
-                // 3. Confirm viewport with evaluate
-                ch.appendLine('\n[3] run_playwright_code -> confirm viewport size');
-                const vpResult = await vscode.lm.invokeTool('run_playwright_code', {
-                    input: { pageId, code: `return JSON.stringify(await page.viewportSize());` },
-                    toolInvocationToken: undefined
-                }, cts.token);
-                const vpRaw = extractRpcResult(vpResult.content);
-                ch.appendLine(`  raw result: ${vpRaw}`);
-                // Result may be a quoted string: "\"{ ... }\"" — unwrap one level if needed
-                let vpJson = vpRaw;
-                if (vpJson?.startsWith('"') && vpJson?.endsWith('"')) { try { vpJson = JSON.parse(vpJson); } catch { /* leave as-is */ } }
-                ch.appendLine(`  viewport: ${vpJson}`);
-
-                // 4. Get page dimensions
-                ch.appendLine('\n[4] run_playwright_code -> page dimensions');
-                const dimsResult = await vscode.lm.invokeTool('run_playwright_code', {
-                    input: {
-                        pageId,
-                        code: `
-                            const vp = await page.viewportSize();
-                            const scrollH = await page.evaluate(() => document.documentElement.scrollHeight);
-                            return JSON.stringify({ vw: vp?.width, vh: vp?.height, scrollH, slices: Math.ceil(scrollH / (vp?.height ?? 800)) });
-                        `
-                    },
-                    toolInvocationToken: undefined
-                }, cts.token);
-                const dimsRaw = extractRpcResult(dimsResult.content);
-                ch.appendLine(`  raw result: ${dimsRaw}`);
-                let dimsJson = dimsRaw;
-                if (dimsJson?.startsWith('"') && dimsJson?.endsWith('"')) { try { dimsJson = JSON.parse(dimsJson); } catch { /* leave as-is */ } }
-                let dims: { vw: number; vh: number; scrollH: number; slices: number } | undefined;
-                try { if (dimsJson) { dims = JSON.parse(dimsJson); } } catch { /* not JSON */ }
-                ch.appendLine(`  parsed: ${JSON.stringify(dims)}`);
-
-                // 5. Screenshot via run_playwright_code — extract Buffer from JSON
-                ch.appendLine('\n[5] run_playwright_code -> screenshot (Buffer as JSON)');
-                const shotResult = await vscode.lm.invokeTool('run_playwright_code', {
-                    input: { pageId, code: `return await page.screenshot({ type: 'jpeg', quality: 80 });` },
-                    toolInvocationToken: undefined
-                }, cts.token);
-                const shotRaw = extractRpcResult(shotResult.content);
-                ch.appendLine(`  raw result prefix (200 chars): ${shotRaw?.slice(0, 200)}`);
-                let imgBytes: Uint8Array | undefined;
-                try {
-                    if (shotRaw) {
-                        const parsed = JSON.parse(shotRaw) as { type: string; data: number[] } | number[] | { type: string; data: number[] };
-                        const arr = Array.isArray(parsed) ? parsed : (parsed as { type: string; data: number[] }).data;
-                        imgBytes = new Uint8Array(arr);
-                        ch.appendLine(`  decoded ${imgBytes.byteLength} bytes — first 4: [${imgBytes[0]},${imgBytes[1]},${imgBytes[2]},${imgBytes[3]}] (JPEG starts with 255,216)`);
-                        ch.appendLine(`  is valid JPEG: ${imgBytes[0] === 255 && imgBytes[1] === 216 ? 'YES ✅' : 'NO ❌'}`);
-                    }
-                } catch (e) { ch.appendLine(`  Buffer parse error: ${e}`); }
-
-                // 6. Slice screenshot: scroll to slice 1, capture, restore
-                if (dims && dims.slices > 1) {
-                    ch.appendLine(`\n[6] run_playwright_code -> slice 1 of ${dims.slices} (scroll + screenshot)`);
-                    const sliceResult = await vscode.lm.invokeTool('run_playwright_code', {
-                        input: {
-                            pageId,
-                            code: `
-                                const vp = await page.viewportSize();
-                                const vh = vp?.height ?? 800;
-                                const prevY = await page.evaluate(() => window.scrollY);
-                                await page.evaluate(y => window.scrollTo(0, y), vh);
-                                await page.waitForTimeout(200);
-                                const buf = await page.screenshot({ type: 'jpeg', quality: 80 });
-                                await page.evaluate(y => window.scrollTo(0, y), prevY);
-                                return buf;
-                            `
-                        },
-                        toolInvocationToken: undefined
-                    }, cts.token);
-                    const sliceRaw = extractRpcResult(sliceResult.content);
-                    ch.appendLine(`  raw prefix (100 chars): ${sliceRaw?.slice(0, 100)}`);
-                    try {
-                        if (sliceRaw) {
-                            const parsed = JSON.parse(sliceRaw) as { type: string; data: number[] } | number[];
-                            const arr = Array.isArray(parsed) ? parsed : (parsed as { type: string; data: number[] }).data;
-                            const bytes = new Uint8Array(arr);
-                            ch.appendLine(`  slice decoded ${bytes.byteLength} bytes — valid JPEG: ${bytes[0] === 255 && bytes[1] === 216 ? 'YES ✅' : 'NO ❌'}`);
-                        }
-                    } catch (e) { ch.appendLine(`  slice Buffer parse error: ${e}`); }
-                } else {
-                    ch.appendLine(`\n[6] SKIPPED — page has ${dims?.slices ?? '?'} slice(s)`);
-                }
-
-                ch.appendLine('\n=== Probe complete ===');
+                fs.mkdirSync(path.dirname(argvPath), { recursive: true });
+                fs.writeFileSync(tmpPath, JSON.stringify(merged, null, '\t') + '\n', 'utf-8');
+                fs.renameSync(tmpPath, argvPath);
+                output?.appendLine(`[enableCdp] wrote enable-proposed-api to ${argvPath}`);
+                void vscode.window.showInformationMessage('Restart VS Code to enable dialog-free browser tools.');
             } catch (err) {
-                ch.appendLine(`\nERROR: ${err}`);
-            } finally {
-                cts.dispose();
+                try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+                void vscode.window.showErrorMessage(`Integrated Browser MCP: could not write argv.json — ${(err as Error).message}`);
             }
         }),
 
         output,
-
-        // Spike: register as a VS Code LM tool to test whether toolInvocationToken flows through
-        // when Claude Code (in VS Code's chat context) invokes us. If hasToken=true in the output
-        // channel, passing the token to subsequent invokeTool calls suppresses the consent dialog.
-        vscode.lm.registerTool('browser_screenshot', {
-            invoke: async (options: vscode.LanguageModelToolInvocationOptions<{ pageId: string }>, _ct: vscode.CancellationToken) => {
-                const { pageId } = options.input;
-                // toolInvocationToken is typed undefined but may be a real opaque object at runtime
-                const hasToken = (options.toolInvocationToken as unknown) !== undefined;
-                output?.appendLine(`[lm-tool:browser_screenshot] pageId=${pageId} hasToken=${hasToken}`);
-
-                const cts = new vscode.CancellationTokenSource();
-                try {
-                    const result = await vscode.lm.invokeTool('screenshot_page', {
-                        input: { pageId },
-                        toolInvocationToken: options.toolInvocationToken
-                    }, cts.token);
-                    const note = new vscode.LanguageModelTextPart(
-                        `[spike: toolInvocationToken ${hasToken ? 'PRESENT ✓ — no dialog expected' : 'absent ✗ — dialog shown'}]\n`
-                    );
-                    return new vscode.LanguageModelToolResult([note, ...result.content]);
-                } finally {
-                    cts.dispose();
-                }
-            }
-        })
     );
 }
 

@@ -72,21 +72,22 @@ export function alreadyRegistered(config: Record<string, unknown>, mcpUrl: strin
     });
 }
 
-export function mergeEntry(existing: Record<string, unknown>, mcpUrl: string): Record<string, unknown> {
+export function mergeEntry(existing: Record<string, unknown>, mcpUrl: string, serverName = 'integratedBrowser'): Record<string, unknown> {
     const existingServers =
         typeof existing.mcpServers === 'object' && existing.mcpServers !== null
             ? (existing.mcpServers as Record<string, unknown>)
             : {};
     return {
         ...existing,
-        mcpServers: { ...existingServers, integratedBrowser: { type: 'http', url: mcpUrl } }
+        mcpServers: { ...existingServers, [serverName]: { type: 'http', url: mcpUrl } }
     };
 }
 
 export async function ensureClaudeMcpEntry(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
-    port: number
+    port: number,
+    serverName = 'integratedBrowser'
 ): Promise<void> {
     if (context.globalState.get('claudeConfig.offered')) { return; }
 
@@ -131,7 +132,7 @@ export async function ensureClaudeMcpEntry(
         return;
     }
 
-    const merged = mergeEntry(existing, mcpUrl);
+    const merged = mergeEntry(existing, mcpUrl, serverName);
     const displayPath = configPath.replace(os.homedir(), '~');
     const tmpPath = `${configPath}.tmp-${process.pid}`;
     try {

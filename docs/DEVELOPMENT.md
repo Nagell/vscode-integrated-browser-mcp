@@ -84,12 +84,11 @@ VS Code shows a consent dialog the **first time** a non-chat extension calls `vs
 
 **No pre-authorization API exists** in VS Code 1.112–1.120 for non-chat extensions. There is no way to bulk-approve or suppress these dialogs programmatically.
 
-**Design consequence:** Tier B/C/D/E tools (eval_js, get_dom, scroll, emulate, markdown, console capture) all route through the single `run_playwright_code` LM tool. This means a user approves one dialog for that entire tier on first use, rather than one dialog per new capability.
+**Design consequence:** Tier B/C/D/E tools (eval_js, get_dom, scroll, emulate, markdown, console capture) route through CDP `Runtime.evaluate` when the proposed `browser` API is available — **no consent dialog** after the initial Tier A approval. If CDP is unavailable (proposed API not enabled), these tools fall back to `run_playwright_code`, which triggers one consent dialog on first use per session.
 
-**What a user can do to reduce friction:**
+**Enabling the CDP path (dialog-free Tier B/C/D/E):**
 
-- Trust the extension publisher in VS Code's extension trust UI — this does not suppress the dialog but may reduce the number of re-prompts across sessions in future VS Code versions.
-- Accept all pending dialogs at session start by calling a Tier A and a Tier B tool once before the main workflow.
+Run the command **Integrated Browser MCP: Enable CDP** from the VS Code command palette. This writes `"enable-proposed-api": ["Nagell.vscode-integrated-browser-mcp"]` to your VS Code `argv.json` and prompts you to restart VS Code. After restart, Tier B/C/D/E tools run without any consent dialogs.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 

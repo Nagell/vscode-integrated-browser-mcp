@@ -67,7 +67,8 @@ than it needs to be.
   bridging existing VS Code LM tools.
 - R6. Expose Tier B tools (`eval_js`, `get_dom`, `scroll`, `emulate`, `get_url`)
   built on `run_playwright_code` (except `get_url`, which is a trivial registry
-  getter).
+  getter). After U17 lands, Tier B tools route through CDP `Runtime.evaluate`;
+  `run_playwright_code` becomes the fallback path only.
 - R7. Improve `screenshot_page` with `fullPage` and `waitMs` options; add a new
   `screenshot_slice` tool with Pythonic negative slice indexing and guaranteed
   scroll restoration.
@@ -97,13 +98,14 @@ than it needs to be.
 
 - **Partial CDP (Approach B)**: Tier A tools (`open_browser_page`, `read_page`,
   `screenshot_page`, `navigate_page`, `click_element`, `type_in_page`, `hover_element`,
-  `drag_element`, `handle_dialog`) remain as `vscode.lm.invokeTool()` calls — each fires
+  `drag_element`, `handle_dialog`, `close_page`) remain as `vscode.lm.invokeTool()` calls — each fires
   once per VS Code session, then caches silently. Tiers B/C/D/E switch from
   `run_playwright_code` to CDP `Runtime.evaluate` (U17), eliminating per-unique-script
   consent dialogs. Full CDP replacement of Tier A is out of scope here — it would require
   re-implementing VS Code's accessibility tree and element-ref system.
 - Not introducing third-party DOM-to-markdown libraries (Turndown, Readability) —
-  markdown is implemented as ~80 lines of in-page JS passed to `run_playwright_code`.
+  markdown is implemented as ~80 lines of in-page JS evaluated via CDP `Runtime.evaluate`
+  (U17); `run_playwright_code` is the fallback path only.
 - Not implementing the network capture / download tools that the competing extension
   exposes — those depend on CDP and are out of scope here.
 - Not changing the existing `read_page` output format — VS Code's pre-formatted
@@ -138,21 +140,23 @@ than it needs to be.
   independently of `CdpManager` and has no test that doesn't mock its internals. Consider
   merging into a private `type CdpTabHandle = { evaluate, send, dispose }` inside
   `CdpManager` to eliminate one file and one class boundary with no behavioral change.
-  Decide during U17 implementation once the API shape is confirmed by the gate experiment.
+  Decide during U17 implementation once the `--remote-debugging-port` gate experiment passes.
 
-- **CDP session WebSocket scope (security):** When U17 opens a `requestCDPProxy()` session,
-  confirm during the gate experiment whether the resulting WebSocket endpoint is accessible
-  to other local processes or is a private in-process channel only. Document in
-  `docs/DEVELOPMENT.md` Known Limitations: "CDP session grants full programmatic access
-  to the browsing context (JS, DOM, cookies, storage). The proxy is VS Code-internal;
-  confirm it is not accessible to other OS processes."
+- **CDP session WebSocket scope (security):** When U17 connects via `--remote-debugging-port`,
+  the DevTools endpoint at `http://localhost:<port>/json/list` is accessible to any local
+  process that can reach that port. Confirm during the gate experiment whether Electron
+  binds to `127.0.0.1` only (standard) or `0.0.0.0`. Document in `docs/DEVELOPMENT.md`
+  Known Limitations: "CDP via `--remote-debugging-port` grants full programmatic access to
+  the browsing context (JS, DOM, cookies, storage) to any local process that can reach the
+  port. The port is `127.0.0.1`-only by default; do not expose it externally."
 
 - **MCP server no auth + DNS rebinding risk:** The server binds to `127.0.0.1` with no
   token. Combined with `eval_js`, any local process (or a browser tab exploiting DNS
   rebinding) can invoke arbitrary JS. Mitigation: add a random session token to the MCP
   URL written to `~/.claude.json` (e.g. `http://127.0.0.1:<port>/mcp?token=<128-bit>`).
   Token generation is trivial (`crypto.randomUUID()`); it defeats DNS rebinding and
-  casual process enumeration. Deferred; add to Known Limitations in the meantime.
+  casual process enumeration. **⚠ BLOCKING for first public release** — add session token
+  before publishing to the VS Code Marketplace. Add to Known Limitations in the meantime.
 
 - **Console capture exfiltration:** `get_console` buffers all `console.*` output from
   the page and returns it to any MCP session that can reach the server. Pages may log
@@ -246,6 +250,14 @@ than it needs to be.
   `run_playwright_code` consent caches per unique script content — every distinct real
   tool call triggers its own dialog (see U3 correction). CDP eliminates this entirely.
   Tier A one-time dialogs (~5-6 at session start, then silent) are the accepted trade-off.
+  **CDP access mechanism (gate result 2026-05-26):** `vscode.debug.onDidStartDebugSession`
+  does NOT fire for the Simple Browser — it is a VS Code WebView panel, not a debug
+  adapter target; `requestCDPProxy` is inaccessible. Correct mechanism: VS Code is
+  Electron-based; launching with `--remote-debugging-port=<port>` (one-time addition to
+  `~/.vscode/argv.json`) exposes all WebView targets — including the Simple Browser — at
+  `http://localhost:<port>/json/list`. The extension connects via WebSocket to
+  `target.webSocketDebuggerUrl` and sends `Runtime.evaluate` commands. Zero user setup
+  beyond the one-time `argv.json` addition (automated by the `enableCdp` command in U17).
 - **`.claude.json` (not `mcp_settings.json`) is the auto-register target on Linux/WSL**:
   the live config on this developer's machine is `~/.claude.json`. Linux/macOS path
   resolution: check `~/.claude.json` first (modern), then `~/.claude/mcp_settings.json`
@@ -300,6 +312,72 @@ but should be answered before Phase 4 ramps up.
   model as DevTools console, do not expose to untrusted network") is the trust
   boundary. Adding a toggle would add friction with no real security benefit for
   the target user (a solo developer running the agent locally).
+
+### Open Questions — From 2026-05-27 Review
+
+- **Consent dialog adoption blocker (PL2):** The plan adds Tier B/C/D/E tools that each
+  trigger additional consent dialogs before U17 ships. No adoption evidence cited for
+  these tools. Before Phase 4 ramps up: validate that at least one Tier B/C/D/E tool
+  has concrete user-pain evidence (GitHub issue, blocked agent workflow) rather than
+  surface-parity motivation. If not, consider shipping Phase 4 incrementally after
+  demand is confirmed.
+
+- **CdpManager vs. single cdp.ts module (SG1):** The spec splits CDP into two files
+  (`cdpSession.ts` + `cdpManager.ts`). `CdpSession` is never instantiated independently
+  of `CdpManager`. Evaluate during U17 implementation (once the gate passes) whether
+  a single `cdp.ts` with a private `type CdpTabHandle` is simpler. Decide before
+  writing any CDP code.
+
+- **U14 SSE push infrastructure scope (SG3):** U14 references `transport.send()` for
+  push notifications. This assumes Claude Code holds the `GET /mcp` SSE stream open
+  continuously. Before designing any broadcast plumbing: run the U14 gate (confirm
+  `transport.send()` is reachable from a live Claude Code session). If not, U14 must
+  be redesigned as a pull model (`get_element_selection` tool). Scope Path A (push)
+  vs Path B (screenshot-only fallback) is undecided.
+
+- **U15 portRegistry vs. 5-line EADDRINUSE retry (SG2 + ADV6):** U15 adds
+  `portRegistry.ts`, a lockfile dependency, and a QuickPick disambiguation flow.
+  No concrete multi-window user-pain evidence cited. A 5-line `EADDRINUSE` retry
+  with port 0 in `mcpServer.ts` may satisfy the actual need. Revisit: is there a
+  real user who has two VS Code windows with the extension running simultaneously?
+  If not, defer U15 in favour of the minimal retry.
+
+- **Per-tool user-pain evidence before Phase 5 (PL3):** Before investing in Phase 5
+  (U17, U14, U15), confirm that Tier B/C/D/E tools are actually adopted and that
+  consent dialogs are the primary blocker. If most usage is Tier A (open, read,
+  screenshot, navigate, click, type), U17 may not be the highest-leverage investment.
+
+- **U17 argv.json adoption friction (PL4):** The `enableCdp` command requires writing
+  to `argv.json` and restarting VS Code — a non-trivial onboarding step. Evaluate
+  whether automatic discovery (polling `/json/list` on well-known ports 9222/9229
+  without requiring the user to set `argv.json` first) is feasible before finalising
+  the UX. If VS Code is already running with `--remote-debugging-port`, the extension
+  could connect without the setup command.
+
+- **U14 gate — transport.send() reachability (PL5):** Must be validated before any
+  U14 architecture is decided. If Claude Code disconnects after each tool call (no
+  persistent SSE), the entire push model fails silently. Gate: start a real Claude
+  Code session, fire a no-op `transport.send()`, confirm receipt. Result determines
+  Path A vs Path B.
+
+- **Consent dialog caching — empirical confirmation needed (ADV5):** The plan states
+  "every distinct `run_playwright_code` code string triggers its own consent dialog."
+  This premise drives the entire U17 motivation. Confirm empirically: does VS Code
+  cache per tool name only, or per tool name + code string? If caching is per-tool
+  name only, U17's urgency changes. Run the consent-dialog caching experiment before
+  committing to U17 implementation.
+
+- **U14 gate fallback — pull model scoping (ADV7):** If the U14 gate fails (SSE stream
+  not held open), the pull model (`get_element_selection` polling tool) needs to be
+  scoped before U14 begins. Define the polling interval, timeout, and user-visible
+  feedback model before deciding U14 is viable at all.
+
+- **Do-nothing baseline — ship Phase 4 with documented limitation vs. indefinite hold (ADV8):**
+  If U17's gate fails and no alternative CDP approach is found, evaluate whether
+  shipping Phase 4 Tier B/C/D/E tools with an explicit "one consent dialog per unique
+  script" Known Limitations entry is better than waiting indefinitely. The dialog is a
+  friction point, not a correctness issue. A shipped tool with friction beats an
+  unshipped tool with no friction. Decide the threshold before Phase 5 begins.
 
 ### Deferred to Implementation
 
@@ -568,7 +646,9 @@ both to the user (output channel) and to the agent (in tool responses).
     or a bare number array and returns a `Uint8Array`; throws a descriptive error if
     the payload is malformed.
   - A new low-level wrapper `runPlaywrightCode(pageId, code): Promise<string | undefined>`
-    that combines `invoke('run_playwright_code', ...)` + `extractRpcResult`.
+    that combines `invoke('run_playwright_code', ...)` + `extractRpcResult`. After U17
+    lands, `runPlaywrightCode` becomes the fallback path (invoked only when CDP is
+    unavailable); the CDP `Runtime.evaluate` path is inserted above it in `CdpManager`.
 - Test: `src/test/extension.test.ts` — unit-test the helpers against canned VS Code
   result shapes (no LM calls needed; construct `LanguageModelTextPart` directly).
 
@@ -924,7 +1004,10 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
 - `eval_js` schema: `{ pageId, expression: string }`. Tool description copy
   (exact text for the registration's `description`): *"Runs arbitrary
   JavaScript in the open page — same trust model as the DevTools console.
-  Don't pass untrusted input."* Code passed to `run_playwright_code`:
+  Don't pass untrusted input."* **Note:** `eval_js` safety depends entirely on
+  MCP server auth being present. Until the session-token work (see Open Questions
+  — DNS rebinding risk) ships, document that `eval_js` must not be used on pages
+  handling credentials when the MCP server is reachable by untrusted local processes. Code passed to `run_playwright_code`:
   `const fn = new Function('return (' + ${JSON.stringify(expression)} + ');');
    return JSON.stringify(await page.evaluate(fn));`. Result is unwrapped via
   `extractRpcResult` and returned as `{ type: 'text', text: result }`. The
@@ -1249,6 +1332,12 @@ injection) was taken.
 - **Out of scope (documented in tool description):** Service Workers, Web
   Workers, and cross-origin iframes. These run in separate execution contexts
   that neither mechanism reaches. If users need them, that's a follow-up.
+- **⚠ Exfiltration risk (required in tool description and Known Limitations):**
+  `get_console` buffers all `console.*` output from the page and returns it to any
+  MCP session that can reach the server. Pages may log auth tokens, JWTs, PII, or
+  secrets to the console. Tool description must include: *"Console capture buffers
+  all `console.*` output including potentially sensitive values (tokens, PII). Do
+  not use on pages handling credentials you haven't verified."*
 
 **Test scenarios:**
 
@@ -1371,104 +1460,130 @@ tests then accrue as each Tier's tool unit lands.
 
 ---
 
-- U17. **Hybrid CDP layer — replace `run_playwright_code` with `Runtime.evaluate`**
+- U17. **Hybrid CDP layer — replace `run_playwright_code` with `Runtime.evaluate`** ✅ COMPLETE (2026-05-28)
 
 **Goal:** Eliminate the per-unique-script consent dialogs that fire on every Tier B/C/D/E
 tool call. Replace all `runPlaywrightCode()` call sites in `browserBridge.ts` with a CDP
-`Runtime.evaluate` call through a debug session, while keeping all Tier A tools (`open_browser_page`,
-`read_page`, `navigate_page`, `click_element`, `type_in_page`, `hover_element`, `drag_element`,
-`handle_dialog`, standard `screenshot_page`) as-is via `vscode.lm.invokeTool`.
+`Runtime.evaluate` call via VS Code's proposed `browser` API, while keeping all Tier A tools
+(`open_browser_page`, `read_page`, `navigate_page`, `click_element`, `type_in_page`,
+`hover_element`, `drag_element`, `handle_dialog`, standard `screenshot_page`) as-is via
+`vscode.lm.invokeTool`.
 
 **Requirements:** R2 (the workaround for per-call consent), R11
 
 **Dependencies:** U4 (establishes `runPlaywrightCode` as the single call site to replace),
 all Tier B/C/D/E units (U8–U12) landed; U17 is a drop-in swap beneath them.
 
+**Gate results (2026-05-27):**
+
+- **FAILED — `onDidStartDebugSession` (2026-05-26):** Does not fire for the Integrated
+  Browser. The Integrated Browser is not a debug adapter target; `requestCDPProxy` is
+  inaccessible. Sessions captured: 0.
+- **FAILED — `--remote-debugging-port` via `argv.json`:** Two problems: (1) VS Code on
+  Windows reads `C:\Users\<user>\.vscode\argv.json`, not WSL's `~/.vscode/argv.json`.
+  (2) `remote-debugging-port` is not in VS Code's supported argv.json key whitelist —
+  the key is silently ignored even when written to the correct file. Port 9222 never
+  opens.
+- **PASSED — VS Code proposed `browser` API (2026-05-27):** `"enabledApiProposals":
+  ["browser"]` in `package.json` + `"enable-proposed-api": ["Nagell.vscode-integrated-browser-mcp"]`
+  in `C:\Users\<user>\.vscode\argv.json` (Windows-side file; written once, VS Code
+  restarted once) gives access to:
+  - `vscode.window.browserTabs` — list of open Integrated Browser tabs ✅
+  - `vscode.window.onDidOpenBrowserTab` — fires when `open_browser_page` opens a tab ✅
+  - `BrowserTab.startCDPSession()` — returns a `BrowserCDPSession` object ✅
+  - `Target.getTargets` + `Target.attachToTarget` → `pageSessionId` ✅
+  - `Runtime.evaluate { expression: "1+1", returnByValue: true }` → `{ value: 2 }` ✅
+  - `Runtime.evaluate { expression: "document.title" }` → `"Example Domain"` ✅
+
+**Key implementation facts (from gate experiment):**
+
+- `BrowserCDPSession` shape: `{ sendMessage(obj): Promise<void>, onDidReceiveMessage(cb),
+  onDidClose(cb), close() }`. Messages are **objects** (not strings) in both directions.
+  No `ws` npm package needed.
+- Bootstrap required after `startCDPSession()`: send `Target.getTargets` with
+  `sessionId: null` (root level) → find the `page` target → send `Target.attachToTarget
+  { targetId, flatten: true }` with `sessionId: null` → save `attachResult.sessionId` as
+  `pageSessionId` → use `pageSessionId` in all subsequent page-scoped commands.
+- Tab correlation: after `open_browser_page(url)` returns a `pageId`, scan
+  `vscode.window.browserTabs` for the tab whose `.url` matches (normalize trailing slash).
+  Map `pageId → BrowserTab` in `CdpManager`.
+- The Windows-side `argv.json` path from WSL: `/mnt/c/Users/dawid/.vscode/argv.json`.
+  The `enableCdp` command must write to the Windows path (use `os.homedir()` from
+  extension host which resolves to WSL home — same WSL/Windows boundary issue as
+  `ensureClaudeMcpEntry`; hard-code Windows path detection or document manual step).
+
 **Files:**
 
 - Create: `src/cdp/cdpSession.ts` — exports `CdpSession` class:
-  - `connect(session: vscode.DebugSession): Promise<void>` — calls
-    `session.requestCDPProxy()` to obtain a WebSocket-like message channel. Stores
-    the proxy handle. (`requestCDPProxy` is a VS Code proposed API — the gate
-    experiment must confirm it exists at the project's `^1.112.0` engine target;
-    if it is still proposed, add `"debugSessionCDP"` to `enabledApiProposals` in
-    `package.json`.)
-  - `evaluate(expression: string, awaitPromise?: boolean): Promise<string | undefined>` —
-    sends `Runtime.evaluate` over the proxy; extracts `.result.value` or `.result.description`.
-    Used by: `evalJs`, `getDom`, `scroll`, `markdown`, `getConsole`, `clearConsole`.
-  - `send<T>(method: string, params?: Record<string, unknown>): Promise<T>` — sends an
-    arbitrary CDP domain command (e.g. `Page.captureScreenshot`, `Emulation.setDeviceMetricsOverride`)
-    and returns the typed result. Used by: `screenshotPage`, `screenshotSlice`, `emulate`.
-  - `dispose(): void` — tears down the proxy and clears state.
+  - constructor takes a `BrowserCDPSession`-shaped object (typed via local interface,
+    not from `vscode.d.ts` — proposed API types not in stable typings).
+  - `bootstrap(): Promise<void>` — `Target.getTargets(sessionId:null)` → find page target
+    → `Target.attachToTarget({ targetId, flatten:true }, sessionId:null)` → save
+    `pageSessionId`. Throws if no page target found.
+  - `evaluate(expression: string): Promise<string | undefined>` — wraps expression in
+    `(async function(){ ${expression} })()`, sends `Runtime.evaluate` with
+    `{ awaitPromise:true, returnByValue:true }` using `pageSessionId`. Returns
+    `String(result.value)` or `result.description` on undefined.
+  - `send(method: string, params?: Record<string,unknown>, sessionId?: string|null): Promise<unknown>` —
+    request-response correlation via incrementing `id` + `pending` Map with 30 s timeout.
+    Routes with `pageSessionId` by default; pass `null` for root-level commands.
+  - `dispose(): void` — calls `session.close()`, rejects pending requests, clears state.
 - Create: `src/cdp/cdpManager.ts` — exports `CdpManager`:
-  - Manages one `CdpSession` per browser tab (keyed by `pageId`).
-  - `ensureSession(pageId: string): Promise<CdpSession>` — returns an existing session
-    or creates one by finding the matching `DebugSession` via `vscode.debug.activeDebugSession`
-    / `vscode.debug.onDidStartDebugSession`.
+  - `trackTab(pageId: string, tab: BrowserTab): void` — stores `pageId → BrowserTab`.
+    Called from `openBrowserPage()` after URL match.
+  - `removeTab(pageId: string): void` — disposes session + removes mapping. Called from
+    `closePage()`.
+  - `ensureSession(pageId: string): Promise<CdpSession>` — returns cached session or
+    creates one: call `tab.startCDPSession()`, wrap in `CdpSession`, call `bootstrap()`,
+    cache and return. Falls back by throwing (caller catches and uses `invokeTool`).
   - `dispose(): void` — disposes all sessions.
-- Modify: `src/browserBridge.ts` — add `setCdpManager(manager: CdpManager): void` setter;
-  replace the body of `runPlaywrightCode(pageId, code)` with:
+- Modify: `src/browserBridge.ts`:
+  - Add module-level `let cdpManager: CdpManager | undefined` + `setCdpManager()` setter.
+  - `openBrowserPage()` — after extracting `pageId`, scan `vscode.window.browserTabs` for
+    URL match and call `cdpManager.trackTab(pageId, tab)` if found.
+  - Each Tier B/C/D/E function gets a CDP-first path with `invokeTool` fallback. The CDP
+    path uses browser-native JS (no `page.*` wrappers). See code string rewrites below.
+  - `closePage()` — call `cdpManager.removeTab(pageId)` after `invoke`.
+- Modify: `src/extension.ts`:
+  - At activation: check `(vscode.window as any).browserTabs !== undefined` to detect
+    proposed API. If present: create `CdpManager`, call `bridge.setCdpManager(manager)`,
+    subscribe `vscode.window.onDidOpenBrowserTab` (adopt tabs opened before activation).
+  - Add `integratedBrowserMcp.enableCdp` command — writes
+    `"enable-proposed-api": ["Nagell.vscode-integrated-browser-mcp"]` to the Windows-side
+    `argv.json` (path: `/mnt/c/Users/<winuser>/.vscode/argv.json`) with RMW + conflict
+    guard + user confirmation. Shows `"Restart VS Code to enable dialog-free browser tools"`.
+  - Remove `integratedBrowserMcp.probeBrowserApi` debug command after U17 ships.
 
-  ```typescript
-  if (cdpManager) {
-      const session = await cdpManager.ensureSession(pageId);
-      return session.evaluate(code, /* awaitPromise */ true);
-  }
-  // fallback to invokeTool if CDP not yet connected
-  const result = await invoke(BROWSER_TOOLS.runPlaywrightCode, { pageId, code });
-  return extractRpcResult(result);
-  ```
+**Code string rewrites (Playwright → browser JS):**
 
-- Modify: `src/extension.ts` — on activation, create `CdpManager` and call
-  `bridge.setCdpManager(manager)` after the MCP server starts. Listen for
-  `vscode.debug.onDidStartDebugSession` to eagerly connect sessions.
-- Modify: `src/mcpServer.ts` — pass `CdpManager` through `ToolContext` so tool
-  registrars can query CDP state for diagnostics (optional; needed only if U4's
-  `parseContract` guard needs updating).
+- `evalJs`: `(async()=>{ return JSON.stringify(await (async()=>(${expression}))()); })()`
+  (awaitPromise:true, returnByValue:true) → result.value is the JSON string.
+- `getDom`: `(function(){ const s=${JSON.stringify(sel??null)}; return s ?
+  document.querySelector(s)?.outerHTML??'' : document.documentElement.outerHTML; })()`
+- `scroll`: already browser JS — pass unchanged.
+- `markdown`: remove outer `page.evaluate((sel)=>{...}, selector)` wrapper →
+  self-contained IIFE with selector inlined via `JSON.stringify`.
+- `getConsole`: split into two `evaluate()` calls — (1) inject `CONSOLE_INJECT` as IIFE
+  (strip `await page.evaluate(() => {...})` wrapper), (2) read buffer.
+- `clearConsole` / `injectConsoleCapture`: strip `await page.evaluate(() => {...})` wrapper.
+- `emulate`: use `send('Emulation.setDeviceMetricsOverride', { width, height, ... })` via
+  `CdpSession.send()` instead of `page.setViewportSize`.
+- `screenshotPage` (fullPage path): use `send('Page.captureScreenshot', { format:'jpeg',
+  quality:80 })` → decode base64 `data` field.
+- `screenshotSlice`: `Page.captureScreenshot` via `send()` + scroll via `evaluate()`.
+  Scroll-restore issued as a separate `evaluate()` from TypeScript.
+- `closePage`: stays on `invokeTool` — `page.close()` has no `Runtime.evaluate` equivalent
+  in VS Code WebViews. One dialog per VS Code session is acceptable.
 
 **Approach:**
 
-- **⚠ Gate experiment — run this before writing any U17 code (≈30 min):** Call
-  `open_browser_page` via the MCP tool and simultaneously listen for
-  `vscode.debug.onDidStartDebugSession` in a scratch extension or `extension.ts` log.
-  Record: (1) does the event fire at all for the Simple Browser / Integrated Browser?
-  (2) what is `session.type`? (3) is `requestCDPProxy` a callable method on the
-  resulting `DebugSession` object, or is it `undefined` (proposed API not yet stable
-  at `^1.112.0`)? (4) if proposed, what is the minimum VS Code version that ships it
-  stable, or does it require `"enabledApiProposals": ["debugSessionCDP"]` in
-  `package.json`? (5) **pageId correlation**: inspect `session.configuration` for a
-  `url` / `targetUrl` field; if absent, check whether `session.name` contains the
-  page URL; if neither, test whether the session fires synchronously enough after
-  `open_browser_page` to use timing-based correlation. Document the confirmed strategy
-  before implementing `ensureSession()`. **If (1) is false, U17 needs architectural
-  redesign before Phase 5 starts — do not proceed with the implementation below until
-  the gate passes.** Document results in `docs/DEVELOPMENT.md`.
-- **Browser opening sequence**: `open_browser_page` still handles tab creation (VS Code
-  emits the `pageId` we need for Tier A tools). Separately, listen for
-  `vscode.debug.onDidStartDebugSession` — VS Code fires this when the integrated browser
-  opens a debug session. Match the session's URL to the active page (exact matching
-  strategy determined by gate experiment result). Use `session.requestCDPProxy()` to
-  obtain the CDP proxy handle.
-- **Fallback**: if no debug session is available (e.g. VS Code opened the tab without
-  launching a debug session), `runPlaywrightCode` falls back to `invokeTool`. On the
-  first fallback call, log a warning to the VS Code output channel:
-  `'[mcp-browser] CDP session unavailable — falling back to invokeTool; consent dialogs may appear'`.
-  This makes the degraded state visible to developers without breaking the agent. No
-  regression vs. today for end users.
-- **`requestCDPProxy` vs. `customRequest`**: thimo's code shows that `requestCDPProxy`
-  is available on child debug sessions (not the root launcher session). The `onDidStartDebugSession`
-  listener must distinguish between root and child sessions — use the session's `parentSession`
-  property (`undefined` = root, set = child). Connect only to child sessions.
-- **No `argv.json` changes needed**: `vscode.debug.startDebugging` (type: `editor-browser`)
-  is the debug-session path; it does not require `--remote-debugging-port`. Zero user setup.
-- **Code string audit (required pre-implementation step, owned by U17):** Before writing
-  any CDP wiring, audit every `runPlaywrightCode` call site in `src/browserBridge.ts`
-  for `page.*` API usage. Classify each occurrence as: (a) zero-arg `page.evaluate()` —
-  strip wrapper; (b) `page.evaluate(fn, arg)` — inline arg via `JSON.stringify`; (c)
-  non-evaluate Playwright API (`page.screenshot`, `page.viewportSize`, `page.waitForTimeout`,
-  `page.close`) — requires a separate CDP `send()` command or exception. Document the
-  classification in a comment above each rewrite. This audit is U17's first implementation
-  step, before any `CdpSession` code is written.
+- **Fallback strategy:** if `cdpManager` is undefined (proposed API not available) or
+  `ensureSession()` throws, `runPlaywrightCode` falls back to `invokeTool` silently.
+  On first fallback, log: `[cdp] CDP unavailable — falling back to invokeTool (consent
+  dialogs will appear). Run "Integrated Browser MCP: Enable CDP" to set up.`
+- **`parseContractGuard`:** remove from CDP evaluate path; keep in `invokeTool` fallback
+  branch (guard protects `extractRpcResult` parsing, which only runs in the fallback).
+- **No `ws` package** — transport is `BrowserCDPSession.sendMessage(object)`, no WebSocket.
 - **`parseContractGuard` decision:** After U17 ships, `parseContractGuard` only fires when
   CDP is unavailable and the fallback `invokeTool` path is used. U17 should explicitly
   decide: remove `parseContractGuard` from the Tier B/C/D/E CDP call sites and retain it
@@ -1509,11 +1624,16 @@ all Tier B/C/D/E units (U8–U12) landed; U17 is a drop-in swap beneath them.
 
 **Patterns to follow:**
 
-- thimo's `CDPTab.connectToSession` and `CDPTab.send` in `src/cdp-tab.ts` for the
-  `requestCDPProxy` / WebSocket message pattern.
-- thimo's `CDPManager.adoptDebugSession` for the debug-session listener pattern.
+- thimo's `CDPTab` pattern (WebSocket + `Runtime.evaluate` / `send`) — see
+  [thimo/integrated-browser-mcp](https://github.com/thimo/integrated-browser-mcp) for
+  the CDP command dispatch pattern. Note: `src/cdp-tab.ts` does **not** exist in this
+  repo; use thimo's external source as reference only for the pattern.
 - Existing `runPlaywrightCode` in [src/browserBridge.ts](src/browserBridge.ts) as the
   single call site being replaced.
+- `ensureClaudeMcpEntry` in [src/install/claudeConfig.ts](src/install/claudeConfig.ts)
+  for the `argv.json` read/write pattern reused by `integratedBrowserMcp.enableCdp`.
+  (This file exists — U5 is complete. Follow the same atomic-write and
+  `os.homedir()`-based path resolution used there.)
 
 **Test scenarios:**
 
@@ -1551,10 +1671,10 @@ supersedes the probe's experimental code path)
 **Files:**
 
 - Modify: `src/extension.ts` — delete the `probeScreenshotSlice` command and its
-  helper block. Remove the now-unused `extractRpcResult` local copy (it lives in
-  `browserBridge.ts` since U4).
-- Modify: `package.json` — remove the `integratedBrowserMcp.probeScreenshotSlice`
-  command from `contributes.commands`.
+  helper block, and the `runCdpGate` gate experiment command. Remove the now-unused
+  `extractRpcResult` local copy (it lives in `browserBridge.ts` since U4).
+- Modify: `package.json` — remove `integratedBrowserMcp.probeScreenshotSlice` and
+  `integratedBrowserMcp.runCdpGate` from `contributes.commands`.
 - Modify: `docs/DEVELOPMENT.md` — replace the implicit reliance on the probe with
   a section titled "Probing a new LM tool" that walks through: list `vscode.lm.tools`,
   read the input schema, write a one-off Mocha test or use Claude Code to call the
@@ -1984,9 +2104,11 @@ when the tool units land.
 
 **Pre-flight gates (run before implementing the units they gate):**
 
-1. **U17 gate** (≈30 min, blocks all U17 code): Verify `onDidStartDebugSession` fires for
-   the integrated browser, confirm `requestCDPProxy` is callable, and determine the
-   `DebugSession→pageId` correlation strategy. See U17 Approach for the full checklist.
+1. **U17 gate** (≈30 min, blocks all U17 code): ~~`onDidStartDebugSession` approach~~
+   **failed (2026-05-26)** — Simple Browser is a WebView, not a debug session. Revised gate:
+   verify the `--remote-debugging-port` approach — add `"remote-debugging-port": 9222` to
+   `argv.json`, restart VS Code, confirm the Simple Browser appears in `/json/list`, and
+   that `Runtime.evaluate` succeeds over WebSocket. See U17 Approach for the full checklist.
 2. **U14 gate** (≈30 min, blocks U14 architecture): Start a real Claude Code session, fire a
    no-op `transport.send()`, and confirm receipt. If Claude Code does not hold the `GET /mcp`
    SSE stream open, U14 must be redesigned as a pull/polling model (`get_element_selection`
@@ -1999,10 +2121,20 @@ when the tool units land.
 
 U17 is highest priority — it unblocks real-world usability. U14 and U15 can follow in either order.
 
-**Release note:** Do not cut a release with Phase 4 tools (U8–U12) without U17. As shipped,
-every Tier B/C/D/E tool call with a distinct code string triggers a consent dialog. U17 is
-the fix; releasing Phase 4 without Phase 5 means users experience maximum dialog friction
-on the new tool surface. Treat Phases 4+5 as a single release unit.
+**Release note:**
+
+- **Tier A tools** (`hover_element`, `drag_element`, `handle_dialog`, `close_page` — U5/U7)
+  can ship independently. They use dedicated VS Code LM tools with one consent dialog per
+  VS Code session, then run silently.
+- **Tier B/C/D/E tools** (U8–U12): do not cut a release without U17 **unless** the
+  `--remote-debugging-port` gate experiment fails (see U17 Approach). As shipped, every
+  distinct `run_playwright_code` code string triggers its own consent dialog; releasing
+  Phase 4 without Phase 5 means users experience maximum dialog friction on the new tool
+  surface.
+- **Contingency (if U17 gate fails):** Tier B/C/D/E tools may ship with an explicit
+  Known Limitations entry: *"Tier B/C/D/E tools require one VS Code consent dialog per
+  unique script call (VS Code limitation). A future update will eliminate these dialogs."*
+  In that case, document the friction clearly in the README before publishing.
 
 ### Phase 6 — Cleanup
 

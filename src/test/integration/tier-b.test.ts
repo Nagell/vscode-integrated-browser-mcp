@@ -21,6 +21,6 @@ suite('Integration: Tier B — eval_js', () => {
         const result = await client.call('eval_js', { pageId, expression: '1 + 1' });
         assert.ok(!result.isError, `unexpected error: ${result.content[0]?.text}`);
         const text = result.content.find(c => c.type === 'text')?.text ?? '';
-        assert.strictEqual(text, '"2"');
+        assert.strictEqual(text, '2');
     });
 });
