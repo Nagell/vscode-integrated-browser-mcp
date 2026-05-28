@@ -20,6 +20,9 @@
     "agent",
     "claude"
   ],
+  "enabledApiProposals": [
+    "browser"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -38,6 +41,10 @@
       {
         "command": "integratedBrowserMcp.listTools",
         "title": "Integrated Browser MCP: List Available LM Tools (debug)"
+      },
+      {
+        "command": "integratedBrowserMcp.enableCdp",
+        "title": "Integrated Browser MCP: Enable CDP (dialog-free browser tools)"
       }
     ],
     "configuration": {

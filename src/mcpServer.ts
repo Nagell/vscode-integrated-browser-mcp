@@ -6,167 +6,29 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as vscode from 'vscode';
-import { z } from 'zod';
-import type { McpContent } from './browserBridge.js';
-import * as bridge from './browserBridge.js';
+import type { PageInfo, ParseContract } from './tools/_context.js';
+import { registerPageTools } from './tools/page.js';
+import { registerInteractionTools } from './tools/interaction.js';
+import { registerVisualTools } from './tools/visual.js';
+import { registerContentTools } from './tools/content.js';
+import { registerDiagnosticTools } from './tools/diagnostic.js';
 
-interface PageInfo { url?: string; openedAt: Date }
 interface SessionEntry { transport: StreamableHTTPServerTransport; server: McpServer; pages: Map<string, PageInfo> }
-
-function errContent(err: unknown): { content: McpContent[]; isError: true } {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
-}
 
 function getSessionId(req: http.IncomingMessage): string | undefined {
     const raw = req.headers['mcp-session-id'];
     return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string, PageInfo>): McpServer {
+function createMcpServerInstance(output: vscode.OutputChannel, pages: Map<string, PageInfo>, parseContract: ParseContract): McpServer {
     const server = new McpServer({ name: 'integrated-browser-mcp', version: '0.0.1' });
+    const ctx = { output, pages, parseContract };
 
-    server.registerTool('open_browser_page', {
-        description: 'Open a URL in VS Code\'s Integrated Browser and return a pageId required by all other tools. ' +
-            'Always provide a url — even if the user already has the page open, pass its URL and VS Code will navigate to it. ' +
-            'Pass forceNew: true to open a second tab alongside an existing one.',
-        inputSchema: {
-            url: z.string().optional().describe('URL to open (required in practice — always pass the URL)'),
-            forceNew: z.boolean().optional().describe('Open in a new tab even if one is already open')
-        }
-    }, async ({ url, forceNew }) => {
-        output.appendLine(`[tool] open_browser_page url=${url ?? '(none)'} forceNew=${forceNew ?? false}`);
-        try {
-            const { pageId, content } = await bridge.openBrowserPage(url, forceNew);
-            pages.set(pageId, { url, openedAt: new Date() });
-            return { content: [{ type: 'text', text: `pageId: ${pageId}` }, ...content] as McpContent[] };
-        } catch (err) {
-            output.appendLine(`[error] open_browser_page: ${err}`);
-            return errContent(err);
-        }
-    });
-
-    server.registerTool('list_pages', {
-        description: 'List all browser pages open in this session.',
-        inputSchema: {}
-    }, async () => {
-        output.appendLine('[tool] list_pages');
-        const entries = Array.from(pages.entries()).map(
-            ([id, info]) => `${id}  ${info.url ?? '(unknown url)'}`
-        );
-        const text = entries.length > 0 ? entries.join('\n') : '(no pages open)';
-        return { content: [{ type: 'text', text }] as McpContent[] };
-    });
-
-    server.registerTool('close_page', {
-        description: 'Close a browser page and remove it from the session.',
-        inputSchema: { pageId: z.string().describe('Page ID from open_browser_page') }
-    }, async ({ pageId }) => {
-        output.appendLine(`[tool] close_page pageId=${pageId}`);
-        let closeNote = '';
-        try {
-            await bridge.closePage(pageId);
-        } catch (err) {
-            output.appendLine(`[close_page] VS Code error closing tab: ${err}`);
-            closeNote = ' (browser tab may still be visible)';
-        }
-        pages.delete(pageId);
-        return { content: [{ type: 'text', text: `Page ${pageId} removed from session.${closeNote}` }] as McpContent[] };
-    });
-
-    server.registerTool('read_page', {
-        description: 'Read the current page content (accessibility tree) from the Integrated Browser.',
-        inputSchema: { pageId: z.string().describe('Page ID from open_browser_page') }
-    }, async ({ pageId }) => {
-        output.appendLine(`[tool] read_page pageId=${pageId}`);
-        try {
-            return { content: await bridge.readPage(pageId) as McpContent[] };
-        } catch (err) {
-            output.appendLine(`[error] read_page: ${err}`);
-            return errContent(err);
-        }
-    });
-
-    server.registerTool('screenshot_page', {
-        description: 'Take a screenshot of the current page in the Integrated Browser.',
-        inputSchema: {
-            pageId: z.string().describe('Page ID from open_browser_page'),
-            ref: z.string().optional().describe('Element ref from snapshot (e.g. "e6")'),
-            selector: z.string().optional().describe('Playwright selector')
-        }
-    }, async ({ pageId, ref, selector }) => {
-        output.appendLine(`[tool] screenshot_page pageId=${pageId}`);
-        try {
-            return { content: await bridge.screenshotPage(pageId, ref, selector) as McpContent[] };
-        } catch (err) {
-            output.appendLine(`[error] screenshot_page: ${err}`);
-            return errContent(err);
-        }
-    });
-
-    server.registerTool('navigate_page', {
-        description: 'Navigate the Integrated Browser: go to a URL, or go back/forward/reload.',
-        inputSchema: {
-            pageId: z.string().describe('Page ID from open_browser_page'),
-            type: z.enum(['url', 'back', 'forward', 'reload']).optional().describe('Navigation type'),
-            url: z.string().optional().describe('URL when type is "url"')
-        }
-    }, async ({ pageId, type, url }) => {
-        output.appendLine(`[tool] navigate_page pageId=${pageId} type=${type} url=${url}`);
-        try {
-            const content = await bridge.navigatePage(pageId, type, url) as McpContent[];
-            const text = (content.find(c => c.type === 'text') as { type: 'text'; text: string } | undefined)?.text;
-            const newUrl = text?.match(/\nURL:\s*(\S+)/)?.[1];
-            if (newUrl) {
-                const info = pages.get(pageId);
-                if (info) { pages.set(pageId, { ...info, url: newUrl }); }
-            } else {
-                output.appendLine(`[navigate_page] could not extract URL from response for pageId=${pageId}`);
-            }
-            return { content };
-        } catch (err) {
-            output.appendLine(`[error] navigate_page: ${err}`);
-            return errContent(err);
-        }
-    });
-
-    server.registerTool('click_element', {
-        description: 'Click an element in the Integrated Browser.',
-        inputSchema: {
-            pageId: z.string().describe('Page ID from open_browser_page'),
-            element: z.string().describe('Human-readable element description (e.g. "submit button")'),
-            ref: z.string().optional().describe('Element ref from snapshot (e.g. "e6")'),
-            selector: z.string().optional().describe('Playwright selector')
-        }
-    }, async ({ pageId, element, ref, selector }) => {
-        output.appendLine(`[tool] click_element pageId=${pageId} element="${element}"`);
-        try {
-            return { content: await bridge.clickElement(pageId, element, ref, selector) as McpContent[] };
-        } catch (err) {
-            output.appendLine(`[error] click_element: ${err}`);
-            return errContent(err);
-        }
-    });
-
-    server.registerTool('type_in_page', {
-        description: 'Type text or press a key in the Integrated Browser.',
-        inputSchema: {
-            pageId: z.string().describe('Page ID from open_browser_page'),
-            text: z.string().optional().describe('Text to type'),
-            key: z.string().optional().describe('Key to press (e.g. "Enter", "Control+c")'),
-            ref: z.string().optional().describe('Element ref from snapshot'),
-            selector: z.string().optional().describe('Playwright selector'),
-            element: z.string().optional().describe('Human-readable element description')
-        }
-    }, async ({ pageId, text, key, ref, selector, element }) => {
-        output.appendLine(`[tool] type_in_page pageId=${pageId} text=${text} key=${key}`);
-        try {
-            return { content: await bridge.typeInPage(pageId, text, key, ref, selector, element) as McpContent[] };
-        } catch (err) {
-            output.appendLine(`[error] type_in_page: ${err}`);
-            return errContent(err);
-        }
-    });
+    registerPageTools(server, ctx);
+    registerInteractionTools(server, ctx);
+    registerVisualTools(server, ctx);
+    registerContentTools(server, ctx);
+    registerDiagnosticTools(server, ctx);
 
     return server;
 }
@@ -175,6 +37,7 @@ export class McpBridgeServer {
     private _httpServer: http.Server | undefined;
     private _sessions = new Map<string, SessionEntry>();
     private _output: vscode.OutputChannel;
+    readonly parseContract: ParseContract = { status: 'unverified' };
 
     constructor(output: vscode.OutputChannel) {
         this._output = output;
@@ -217,7 +80,7 @@ export class McpBridgeServer {
                     }
 
                     const pages = new Map<string, PageInfo>();
-                    const mcpServer = createMcpServerInstance(this._output, pages);
+                    const mcpServer = createMcpServerInstance(this._output, pages, this.parseContract);
                     const transport = new StreamableHTTPServerTransport({
                         sessionIdGenerator: () => randomUUID(),
                         onsessioninitialized: (sid) => {
@@ -284,11 +147,6 @@ export class McpBridgeServer {
             this._httpServer = server;
 
             server.on('error', (err: NodeJS.ErrnoException) => {
-                if (err.code === 'EADDRINUSE') {
-                    vscode.window.showErrorMessage(`Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`);
-                } else {
-                    vscode.window.showErrorMessage(`Integrated Browser MCP: failed to start (${err.code ?? err.message}).`);
-                }
                 reject(err);
             });
 

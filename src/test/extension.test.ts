@@ -1,7 +1,13 @@
 import * as assert from 'assert';
+import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from '../mcpServer.js';
+import { errContent } from '../util/mcpResult.js';
+import { extractRpcResult, decodeBuffer, normalizeSlice } from '../browserBridge.js';
+import { mergeEntry, alreadyRegistered } from '../install/claudeConfig.js';
 
 const TEST_PORT = 3199;
 
@@ -61,6 +67,74 @@ function del(url: string, sessionId?: string): Promise<{ status: number; body: s
         req.end();
     });
 }
+
+function textResult(...texts: string[]): vscode.LanguageModelToolResult {
+    return new vscode.LanguageModelToolResult(texts.map(t => new vscode.LanguageModelTextPart(t)));
+}
+
+suite('extractRpcResult', () => {
+    test('extracts Result: value from a single text part', () => {
+        const result = extractRpcResult(textResult('Result: foo\nPage Title: x'));
+        assert.strictEqual(result, 'foo');
+    });
+
+    test('unwraps one level of JSON string quoting', () => {
+        const result = extractRpcResult(textResult('Result: "{\\"a\\":1}"'));
+        assert.strictEqual(result, '{"a":1}');
+    });
+
+    test('returns undefined for empty parts array', () => {
+        assert.strictEqual(extractRpcResult(new vscode.LanguageModelToolResult([])), undefined);
+    });
+
+    test('returns undefined when no Result: prefix', () => {
+        assert.strictEqual(extractRpcResult(textResult('Page Title: x\nSome content')), undefined);
+    });
+});
+
+suite('decodeBuffer', () => {
+    test('decodes {"type":"Buffer","data":[...]} shape', () => {
+        const buf = decodeBuffer('{"type":"Buffer","data":[255,216,1,2]}');
+        assert.deepStrictEqual(Array.from(buf), [255, 216, 1, 2]);
+    });
+
+    test('decodes bare number array', () => {
+        const buf = decodeBuffer('[255,216,1,2]');
+        assert.deepStrictEqual(Array.from(buf), [255, 216, 1, 2]);
+    });
+
+    test('throws on invalid JSON with Buffer in message', () => {
+        assert.throws(() => decodeBuffer('not json'), /Buffer/);
+    });
+});
+
+suite('normalizeSlice', () => {
+    test('slice 0 of 5 returns 0', () => assert.strictEqual(normalizeSlice(0, 5), 0));
+    test('slice 4 of 5 returns 4', () => assert.strictEqual(normalizeSlice(4, 5), 4));
+    test('slice -1 of 5 returns 4 (last)', () => assert.strictEqual(normalizeSlice(-1, 5), 4));
+    test('slice -5 of 5 returns 0', () => assert.strictEqual(normalizeSlice(-5, 5), 0));
+    test('positive overshoot clamps to last (7 of 5 → 4)', () => assert.strictEqual(normalizeSlice(7, 5), 4));
+    test('totalSlices 1: any index returns 0', () => {
+        assert.strictEqual(normalizeSlice(0, 1), 0);
+        assert.strictEqual(normalizeSlice(5, 1), 0);
+        assert.strictEqual(normalizeSlice(-1, 1), 0);
+    });
+});
+
+suite('errContent', () => {
+    test('wraps an Error instance with isError: true', () => {
+        const result = errContent(new Error('boom'));
+        assert.strictEqual(result.isError, true);
+        assert.strictEqual(result.content[0].type, 'text');
+        assert.strictEqual(result.content[0].text, 'Error: boom');
+    });
+
+    test('wraps a string with isError: true', () => {
+        const result = errContent('string error');
+        assert.strictEqual(result.isError, true);
+        assert.strictEqual(result.content[0].text, 'Error: string error');
+    });
+});
 
 suite('McpBridgeServer', () => {
     let output: vscode.OutputChannel;
@@ -223,19 +297,43 @@ suite('McpBridgeServer', () => {
             assert.ok(res.status >= 200 && res.status < 300, `expected 2xx, got ${res.status}: ${res.body}`);
         });
 
-        test('tools/list returns all 8 expected tools', async () => {
+        test('tools/list returns all 22 expected tools', async () => {
             const res = await rpc('tools/list', {}, 2);
             assert.strictEqual(res.status, 200);
             const payload = parseResult(res.body) as { result: { tools: { name: string }[] } };
             const names = payload.result.tools.map(t => t.name);
             const expected = [
-                'open_browser_page', 'list_pages', 'close_page',
-                'read_page', 'screenshot_page', 'navigate_page',
-                'click_element', 'type_in_page'
+                'open_browser_page', 'list_pages', 'close_page', 'navigate_page',
+                'list_visible_pages', 'attach_visible_page', 'get_url',
+                'screenshot_page', 'screenshot_slice', 'emulate',
+                'read_page', 'markdown', 'eval_js', 'get_dom',
+                'click_element', 'type_in_page', 'hover_element', 'drag_element', 'handle_dialog', 'scroll',
+                'get_console', 'clear_console'
             ];
-            assert.strictEqual(names.length, 8, `expected 8 tools, got: ${names.join(', ')}`);
+            assert.strictEqual(names.length, 22, `expected 22 tools, got: ${names.join(', ')}`);
             for (const name of expected) {
                 assert.ok(names.includes(name), `expected tool "${name}" in list, got: ${names.join(', ')}`);
+            }
+        });
+
+        test('screenshot_page schema includes fullPage and waitMs fields', async () => {
+            const res = await rpc('tools/list', {}, 2);
+            const payload = parseResult(res.body) as { result: { tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[] } };
+            const tool = payload.result.tools.find(t => t.name === 'screenshot_page');
+            assert.ok(tool, 'screenshot_page not found');
+            const props = tool.inputSchema.properties ?? {};
+            assert.ok('fullPage' in props, 'fullPage field missing from screenshot_page schema');
+            assert.ok('waitMs' in props, 'waitMs field missing from screenshot_page schema');
+        });
+
+        test('screenshot_page without fullPage/waitMs succeeds (no parseContract error path)', async () => {
+            const res = await rpc('tools/call', { name: 'screenshot_page', arguments: { pageId: 'x', fullPage: false } }, 2);
+            assert.strictEqual(res.status, 200);
+            const payload = parseResult(res.body) as { result: { isError?: boolean } };
+            // With no real browser, will error — but must NOT be a parseContract diverged error
+            if (payload.result.isError) {
+                const text = (payload.result as unknown as { content: { text: string }[] }).content?.[0]?.text ?? '';
+                assert.ok(!text.includes('cannot parse VS Code'), `unexpected parseContract error: ${text}`);
             }
         });
 
@@ -267,5 +365,79 @@ suite('McpBridgeServer', () => {
         } finally {
             await server2.stop().catch(() => { /* already failed */ });
         }
+    });
+});
+
+// Compiled to out/test/ — go up two levels to reach src/test/fixtures/
+const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'test', 'fixtures', 'claude.json.realistic');
+
+suite('mergeEntry', () => {
+    test('adds integratedBrowser to empty config', () => {
+        const merged = mergeEntry({}, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(merged.mcpServers, {
+            integratedBrowser: { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        });
+    });
+
+    test('preserves all other top-level keys', () => {
+        const existing = { theme: 'dark', telemetry: { enabled: false }, mcpServers: { other: { type: 'stdio' } } };
+        const merged = mergeEntry(existing, 'http://127.0.0.1:3100/mcp');
+        assert.strictEqual(merged.theme, 'dark');
+        assert.deepStrictEqual(merged.telemetry, { enabled: false });
+        assert.ok('other' in (merged.mcpServers as object), 'existing server preserved');
+        assert.ok('integratedBrowser' in (merged.mcpServers as object), 'new entry added');
+    });
+
+    test('overwrites existing integratedBrowser entry', () => {
+        const existing = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:9999/mcp' } } };
+        const merged = mergeEntry(existing, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(
+            (merged.mcpServers as Record<string, unknown>).integratedBrowser,
+            { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        );
+    });
+
+    test('realistic fixture: integratedBrowser added, all other keys preserved', () => {
+        const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf-8')) as Record<string, unknown>;
+        const merged = mergeEntry(fixture, 'http://127.0.0.1:3100/mcp');
+        assert.deepStrictEqual(
+            (merged.mcpServers as Record<string, unknown>).integratedBrowser,
+            { type: 'http', url: 'http://127.0.0.1:3100/mcp' }
+        );
+        for (const key of Object.keys(fixture)) {
+            if (key === 'mcpServers') { continue; }
+            assert.deepStrictEqual(merged[key], fixture[key], `top-level key "${key}" was not preserved`);
+        }
+        const fixtureMcp = fixture.mcpServers as Record<string, unknown>;
+        const mergedMcp = merged.mcpServers as Record<string, unknown>;
+        for (const key of Object.keys(fixtureMcp)) {
+            assert.deepStrictEqual(mergedMcp[key], fixtureMcp[key], `mcpServers.${key} was not preserved`);
+        }
+    });
+});
+
+suite('alreadyRegistered', () => {
+    test('returns false for empty config', () => {
+        assert.strictEqual(alreadyRegistered({}, 'http://127.0.0.1:3100/mcp'), false);
+    });
+
+    test('returns true when exact URL matches', () => {
+        const config = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:3100/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), true);
+    });
+
+    test('returns true when localhost matches 127.0.0.1', () => {
+        const config = { mcpServers: { myBrowser: { type: 'http', url: 'http://localhost:3100/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), true);
+    });
+
+    test('returns false when port differs', () => {
+        const config = { mcpServers: { integratedBrowser: { type: 'http', url: 'http://127.0.0.1:9999/mcp' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), false);
+    });
+
+    test('returns false when only other servers present', () => {
+        const config = { mcpServers: { github: { type: 'stdio', command: 'npx' } } };
+        assert.strictEqual(alreadyRegistered(config, 'http://127.0.0.1:3100/mcp'), false);
     });
 });

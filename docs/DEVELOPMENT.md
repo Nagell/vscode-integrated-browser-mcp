@@ -6,6 +6,7 @@
 - [Development](#development)
   - [Documentation](#documentation)
   - [Architecture](#architecture)
+  - [Permission dialog scope](#permission-dialog-scope)
   - [Common commands](#common-commands)
   - [Project MCP config (.mcp.json)](#project-mcp-config-mcpjson)
   - [Running the extension](#running-the-extension)
@@ -59,6 +60,35 @@ MCP client (Claude Code, Cline, Continue.dev, …)
 ```
 
 Each connected MCP client session gets its own `StreamableHTTPServerTransport` instance and a `pages` map tracking open page IDs. Page IDs are assigned by VS Code and required by every browser tool call after `open_browser_page`.
+
+### Naming conventions
+
+| Form | Meaning | When to use |
+| --- | --- | --- |
+| `run_playwright_code` | The VS Code LM tool identifier — the string passed to `vscode.lm.invokeTool()` | Tool name in strings, consent dialog discussion, "route through the LM tool" |
+| `runPlaywrightCode()` | The TypeScript function exported from `src/browserBridge.ts` | Code references, call sites, function names in TS context |
+
+The same pattern applies to all tool pairs: `open_browser_page` (LM tool ID) vs. `openBrowserPage()` (TS function), etc.
+
+<p align="right">(<a href="#development-top">back to top</a>)</p>
+
+## Permission dialog scope
+
+VS Code shows a consent dialog the **first time** a non-chat extension calls `vscode.lm.invokeTool()` for a given tool in a session. Subsequent calls to the same tool within the same session run silently — VS Code caches the trust decision.
+
+**Confirmed behaviour (Phase 0 spike, VS Code 1.120):**
+
+- 6 tool calls → 6 initial dialogs (one per distinct tool, fired on first use)
+- After approving each tool once, the rest of the session is prompt-free
+- Applies to both `open_browser_page` (a dedicated VS Code LM tool) and `run_playwright_code` (used by Tier B/C/D/E tools)
+
+**No pre-authorization API exists** in VS Code 1.112–1.120 for non-chat extensions. There is no way to bulk-approve or suppress these dialogs programmatically.
+
+**Design consequence:** Tier B/C/D/E tools (eval_js, get_dom, scroll, emulate, markdown, console capture) route through CDP `Runtime.evaluate` when the proposed `browser` API is available — **no consent dialog** after the initial Tier A approval. If CDP is unavailable (proposed API not enabled), these tools fall back to `run_playwright_code`, which triggers one consent dialog on first use per session.
+
+**Enabling the CDP path (dialog-free Tier B/C/D/E):**
+
+Run the command **Integrated Browser MCP: Enable CDP** from the VS Code command palette. This writes `"enable-proposed-api": ["Nagell.vscode-integrated-browser-mcp"]` to your VS Code `argv.json` and prompts you to restart VS Code. After restart, Tier B/C/D/E tools run without any consent dialogs.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
@@ -129,12 +159,42 @@ The **Integrated Browser MCP** output channel (View → Output → select from d
 pnpm test
 ```
 
-Runs automated tests against a real `McpBridgeServer` instance started on port 3199 inside VS Code's test extension host. Covers:
+Runs automated tests inside VS Code's test extension host. Two categories:
 
-- HTTP infrastructure (health endpoint, session lifecycle, error responses, EADDRINUSE)
-- MCP protocol (all 8 tools registered, `list_pages` empty on fresh session, `close_page` succeeds with unknown page ID)
+**Unit / server tests** (`src/test/extension.test.ts`, port 3199) — cover HTTP infrastructure, MCP protocol, tool registration, and schema validation. Do **not** invoke VS Code browser tools.
 
-These tests do **not** invoke the VS Code browser tools — they test the server layer only. Full end-to-end browser testing requires the manual test runbook below.
+**Integration tests** (`src/test/integration/tier-*.test.ts`, port 3198) — call real MCP tools end-to-end through `vscode.lm.invokeTool`. Each Tier has one happy-path test:
+
+| File | Tier | Scenario |
+|---|---|---|
+| `tier-b.test.ts` | B | `eval_js` `1 + 1` → `"2"` |
+| `tier-c.test.ts` | C | `screenshot_page` → JPEG bytes `0xFF 0xD8` |
+| `tier-d.test.ts` | D | inject `<h1>Hello</h1>`, `markdown` → `# Hello` |
+| `tier-e.test.ts` | E | `console.log("boom")` via eval_js, `get_console` → entry contains `boom` |
+
+Integration tests **skip gracefully** if `open_browser_page` fails (i.e. no workbench renderer is available — `if (!pageId) { return; }`). This means they pass in unit-only CI runs but produce real coverage when VS Code has a display context (xvfb or local dev host).
+
+### CI test environment
+
+The GitHub Actions workflow (`.github/workflows/test.yml`) runs on a Linux runner using `xvfb-run -a pnpm test` to provide a virtual display. VS Code's extension host starts under Xvfb, which enables the integration tests to call `vscode.lm.invokeTool` and open real browser tabs.
+
+**Debugging CI failures locally:**
+
+```sh
+# Run exactly as CI does (requires Xvfb)
+xvfb-run -a pnpm test
+
+# Run without Xvfb (integration tests skip gracefully, unit tests run normally)
+pnpm test
+
+# Run a single test file
+pnpm test --grep "Tier B"
+```
+
+**If integration tests are skipped in CI** (all four tier suites pass but assertions are not reached): the workbench renderer is not opening the browser panel. Check:
+1. `workbench.browser.enableChatTools: true` is set in `src/test/workspace/.vscode/settings.json`
+2. The `lm-tool-availability` test is green (tools are registered)
+3. `open_browser_page` is present in `vscode.lm.tools` but `invokeTool` fails — VS Code may require a panel to be opened first; add `vscode.commands.executeCommand('simpleBrowser.show', 'about:blank')` to `suiteSetup` in `_helpers.ts` if needed
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
