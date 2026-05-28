@@ -437,7 +437,7 @@ external trigger (terminal link, debug session, etc.)
 
 ## Implementation Units
 
-- U1. **Extract shared helpers (errContent, schema fragments)**
+- U1. **Extract shared helpers (errContent, schema fragments)** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Move `errContent` out of `mcpServer.ts` and create a small shared zod schema
 fragments file. Both will be imported by every per-tool registrar in U2 and by every
@@ -485,7 +485,7 @@ new tool added in U7–U12, so they must exist before the split.
 
 ---
 
-- U2. **Split mcpServer.ts → src/tools/ directory**
+- U2. **Split mcpServer.ts → src/tools/ directory** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Move every `server.registerTool(...)` call out of `createMcpServerInstance`
 into a `tools/*.ts` registrar. `mcpServer.ts` keeps HTTP, session, and transport
@@ -547,7 +547,7 @@ only when green.
 
 ---
 
-- U3. **Investigate and address per-call permission prompts**
+- U3. **Investigate and address per-call permission prompts** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Determine whether VS Code 1.112+ offers any mechanism to pre-authorize
 `vscode.lm.invokeTool()` calls from a non-chat extension. Implement the fix if one
@@ -624,7 +624,7 @@ DEVELOPMENT.md section regardless of outcome.
 
 ---
 
-- U4. **Add run_playwright_code helpers to browserBridge**
+- U4. **Add run_playwright_code helpers to browserBridge** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Add `extractRpcResult` and `decodeBuffer` helpers to `src/browserBridge.ts`
 so every Tier B/C/D/E tool uses the same parse path. The probe command in
@@ -724,7 +724,7 @@ both to the user (output channel) and to the agent (in tool responses).
 
 ---
 
-- U5. **Auto-register MCP entry in Claude Code config**
+- U5. **Auto-register MCP entry in Claude Code config** ✅ COMPLETE (2026-05-20)
 
 **Goal:** On activation, check whether the Claude Code config contains our MCP entry;
 if not, show a one-time VS Code notification ("Add Integrated Browser MCP to Claude
@@ -823,7 +823,7 @@ the file if absent). Track "already offered" in `extensionContext.globalState`.
 
 ---
 
-- U6. **`attach_visible_page` — grab control of an already-open tab**
+- U6. **`attach_visible_page` — grab control of an already-open tab** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Expose a new MCP tool `attach_visible_page` that lets an agent take
 control of a browser tab the user already has open (terminal link click, debug
@@ -914,7 +914,7 @@ that design with the agent-driven tool model.
 
 ---
 
-- U7. **Tier A tools — hover_element, drag_element, handle_dialog**
+- U7. **Tier A tools — hover_element, drag_element, handle_dialog** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Wire the three remaining VS Code LM browser tools through MCP. Schemas
 must be read from `vscode.lm.tools` at development time and mirrored verbatim
@@ -973,7 +973,7 @@ up holding shared fragments Tier A reuses.
 
 ---
 
-- U8. **Tier B tools — eval_js, get_dom, scroll, emulate, get_url**
+- U8. **Tier B tools — eval_js, get_dom, scroll, emulate, get_url** ✅ COMPLETE (2026-05-20)
 
 **Goal:** Add five `run_playwright_code`-backed tools (four), plus one trivial
 registry getter (`get_url`). All share the `extractRpcResult` parse path.
@@ -1081,7 +1081,7 @@ registry getter (`get_url`). All share the `extractRpcResult` parse path.
 
 ---
 
-- U9. **Tier C — screenshot_page additions (fullPage, waitMs)**
+- U9. **Tier C — screenshot_page additions (fullPage, waitMs)** ✅ COMPLETE (2026-05-21)
 
 **Goal:** Extend `screenshot_page` with two optional parameters: `fullPage`
 (boolean, default false) and `waitMs` (number, default 0). When either is set,
@@ -1143,7 +1143,7 @@ can pass options Playwright supports but the LM tool does not expose.
 
 ---
 
-- U10. **Tier C — screenshot_slice (new tool)**
+- U10. **Tier C — screenshot_slice (new tool)** ✅ COMPLETE (2026-05-21)
 
 **Goal:** Add `screenshot_slice` that returns a single viewport-height slice of
 the page at a given slice index. Supports Pythonic negative indexing
@@ -1210,7 +1210,7 @@ the page at a given slice index. Supports Pythonic negative indexing
 
 ---
 
-- U11. **Tier D — markdown extraction tool**
+- U11. **Tier D — markdown extraction tool** ✅ COMPLETE (2026-05-21)
 
 **Goal:** Add a `markdown` tool that returns a clean markdown rendering of the
 page (or a selector-scoped subtree). Implementation is ~80 lines of in-page JS
@@ -1266,7 +1266,7 @@ passed to `run_playwright_code`. No npm dependency.
 
 ---
 
-- U12. **Tier E — console capture (get_console, clear_console, auto-inject)**
+- U12. **Tier E — console capture (get_console, clear_console, auto-inject)** ✅ COMPLETE (2026-05-21)
 
 **Goal:** Inject a console-capture script into every page on `open_browser_page`
 that buffers console events to `window.__mcpConsole`. Expose `get_console` and
@@ -1381,7 +1381,7 @@ fallback path should document this limitation explicitly in the tool description
 
 ---
 
-- U16. **CI workflow + integration tests for new tools**
+- U16. **CI workflow + integration tests for new tools** ✅ COMPLETE (2026-05-21)
 
 **Goal:** Stand up a GitHub Actions workflow that runs the test suite on PRs
 and pushes. Add one happy-path integration test per Tier so the parse-and-decode
