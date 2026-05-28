@@ -130,7 +130,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 await server!.start(port);
                 vscode.window.showInformationMessage(`MCP server started on port ${server!.port}`);
             } catch (err) {
-                vscode.window.showErrorMessage(`Failed to start MCP server: ${err}`);
+                const msg = (err as NodeJS.ErrnoException).code === 'EADDRINUSE'
+                    ? `Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`
+                    : `Failed to start MCP server: ${err}`;
+                vscode.window.showErrorMessage(msg);
             }
         }),
 
