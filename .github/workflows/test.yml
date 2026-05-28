@@ -37,4 +37,5 @@ jobs:
             libsecret-1-0
 
       - name: Run tests
+        if: "!startsWith(github.head_ref, 'release-please')"
         run: xvfb-run -a pnpm test
