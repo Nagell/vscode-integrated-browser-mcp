@@ -70,7 +70,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "pnpm run compile && pnpm run lint",
     "test": "vscode-test",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "publish": "vsce publish --no-dependencies --allow-proposed-apis browser"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
