@@ -40,19 +40,21 @@ function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
     });
 }
 
-// Resolves the Windows-side argv.json path. In WSL, VS Code reads the Windows user's file,
-// not the Linux one. Uses USERPROFILE / HOMEDRIVE+HOMEPATH env vars exposed by WSL interop.
-function resolveWindowsArgvPath(): string {
+// Returns all candidate argv.json paths to try. Writes to all of them so the command
+// works on native Linux, WSL (Windows-side file), and native Windows.
+function collectArgvPaths(): string[] {
     const toWsl = (p: string) => p
         .replace(/^([A-Za-z]):[/\\]/, (_, d: string) => `/mnt/${d.toLowerCase()}/`)
         .replace(/\\/g, '/');
+    const candidates: string[] = [];
     if (process.env.USERPROFILE) {
-        return path.join(toWsl(process.env.USERPROFILE), '.vscode', 'argv.json');
+        candidates.push(path.join(toWsl(process.env.USERPROFILE), '.vscode', 'argv.json'));
     }
     if (process.env.HOMEDRIVE && process.env.HOMEPATH) {
-        return path.join(toWsl(`${process.env.HOMEDRIVE}${process.env.HOMEPATH}`), '.vscode', 'argv.json');
+        candidates.push(path.join(toWsl(`${process.env.HOMEDRIVE}${process.env.HOMEPATH}`), '.vscode', 'argv.json'));
     }
-    return path.join(os.homedir(), '.vscode', 'argv.json');
+    candidates.push(path.join(os.homedir(), '.vscode', 'argv.json'));
+    return [...new Set(candidates)];
 }
 
 function parseArgvJson(raw: string): Record<string, unknown> {
@@ -154,23 +156,17 @@ export async function activate(context: vscode.ExtensionContext) {
         }),
 
         vscode.commands.registerCommand('integratedBrowserMcp.enableCdp', async () => {
-            const argvPath = resolveWindowsArgvPath();
+            const argvPaths = collectArgvPaths();
             const extId = 'Nagell.vscode-integrated-browser-mcp';
 
-            let existing: Record<string, unknown> = {};
-            try {
-                existing = parseArgvJson(fs.readFileSync(argvPath, 'utf-8'));
-            } catch (err) {
-                if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-                    void vscode.window.showErrorMessage(`Integrated Browser MCP: could not read argv.json — ${(err as Error).message}`);
-                    return;
-                }
-            }
-
-            const current = Array.isArray(existing['enable-proposed-api'])
-                ? (existing['enable-proposed-api'] as string[])
-                : [];
-            if (current.includes(extId)) {
+            const alreadyEnabled = argvPaths.some(p => {
+                try {
+                    const parsed = parseArgvJson(fs.readFileSync(p, 'utf-8'));
+                    return Array.isArray(parsed['enable-proposed-api']) &&
+                        (parsed['enable-proposed-api'] as string[]).includes(extId);
+                } catch { return false; }
+            });
+            if (alreadyEnabled) {
                 void vscode.window.showInformationMessage('Integrated Browser MCP: CDP is already enabled. Restart VS Code if dialogs still appear.');
                 return;
             }
@@ -182,17 +178,39 @@ export async function activate(context: vscode.ExtensionContext) {
             );
             if (choice !== 'Enable') { return; }
 
-            const merged = { ...existing, 'enable-proposed-api': [...current, extId] };
-            const tmpPath = `${argvPath}.tmp-${process.pid}`;
-            try {
-                fs.mkdirSync(path.dirname(argvPath), { recursive: true });
-                fs.writeFileSync(tmpPath, JSON.stringify(merged, null, '\t') + '\n', 'utf-8');
-                fs.renameSync(tmpPath, argvPath);
-                output?.appendLine(`[enableCdp] wrote enable-proposed-api to ${argvPath}`);
+            let wrote = 0;
+            for (const argvPath of argvPaths) {
+                let existing: Record<string, unknown> = {};
+                try {
+                    existing = parseArgvJson(fs.readFileSync(argvPath, 'utf-8'));
+                } catch (err) {
+                    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                        output?.appendLine(`[enableCdp] skipping ${argvPath}: ${err}`);
+                        continue;
+                    }
+                }
+                const current = Array.isArray(existing['enable-proposed-api'])
+                    ? (existing['enable-proposed-api'] as string[])
+                    : [];
+                if (current.includes(extId)) { wrote++; continue; }
+                const merged = { ...existing, 'enable-proposed-api': [...current, extId] };
+                const tmpPath = `${argvPath}.tmp-${process.pid}`;
+                try {
+                    fs.mkdirSync(path.dirname(argvPath), { recursive: true });
+                    fs.writeFileSync(tmpPath, JSON.stringify(merged, null, '\t') + '\n', 'utf-8');
+                    fs.renameSync(tmpPath, argvPath);
+                    output?.appendLine(`[enableCdp] wrote enable-proposed-api to ${argvPath}`);
+                    wrote++;
+                } catch (err) {
+                    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+                    output?.appendLine(`[enableCdp] could not write to ${argvPath}: ${err}`);
+                }
+            }
+
+            if (wrote > 0) {
                 void vscode.window.showInformationMessage('Restart VS Code to enable dialog-free browser tools.');
-            } catch (err) {
-                try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-                void vscode.window.showErrorMessage(`Integrated Browser MCP: could not write argv.json — ${(err as Error).message}`);
+            } else {
+                void vscode.window.showErrorMessage('Integrated Browser MCP: could not write to any argv.json location.');
             }
         }),
 
