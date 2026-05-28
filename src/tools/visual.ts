@@ -30,7 +30,7 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
             return { content: await bridge.screenshotPage(pageId, ref, selector, fullPage, waitMs) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] screenshot_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -53,7 +53,7 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
             return { content: await bridge.screenshotSlice(pageId, slice, width, height) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] screenshot_slice: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -73,7 +73,7 @@ export function registerVisualTools(server: McpServer, ctx: ToolContext): void {
             return { content: [{ type: 'text', text: `Viewport set to ${width}x${height}.` }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] emulate: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 }

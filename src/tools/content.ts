@@ -18,7 +18,7 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
             return { content: await bridge.readPage(pageId) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] read_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -37,7 +37,7 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
             return { content: [{ type: 'text', text: result ?? 'undefined' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] eval_js: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -58,7 +58,7 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
             return { content: [{ type: 'text', text: result ?? '' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] markdown: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -77,7 +77,7 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
             return { content: [{ type: 'text', text: result ?? '' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] get_dom: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 }

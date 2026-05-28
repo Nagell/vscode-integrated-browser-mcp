@@ -23,7 +23,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: await bridge.clickElement(pageId, element, ref, selector) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] click_element: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -43,7 +43,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: await bridge.typeInPage(pageId, text, key, ref, selector, element) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] type_in_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -61,7 +61,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: await bridge.hoverElement(pageId, element, ref, selector) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] hover_element: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -82,7 +82,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: await bridge.dragElement(pageId, sourceElement, targetElement, sourceRef, targetRef, sourceSelector, targetSelector) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] drag_element: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -99,7 +99,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: await bridge.handleDialog(pageId, action, text) as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] handle_dialog: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -124,7 +124,7 @@ export function registerInteractionTools(server: McpServer, ctx: ToolContext): v
             return { content: [{ type: 'text', text: 'Scrolled.' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] scroll: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 }

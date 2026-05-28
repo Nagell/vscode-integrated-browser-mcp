@@ -28,7 +28,7 @@ export function registerDiagnosticTools(server: McpServer, ctx: ToolContext): vo
             return { content: [{ type: 'text', text: result ?? '[]' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] get_console: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -44,7 +44,7 @@ export function registerDiagnosticTools(server: McpServer, ctx: ToolContext): vo
             return { content: [{ type: 'text', text: 'Console cleared.' }] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] clear_console: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 }

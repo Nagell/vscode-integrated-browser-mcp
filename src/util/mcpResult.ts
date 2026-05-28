@@ -1,7 +1,12 @@
 export type { McpContent } from '../browserBridge.js';
 
-export function errContent(err: unknown): { content: [{ type: 'text'; text: string }]; isError: true } {
+export function errContent(
+    err: unknown,
+    log?: (msg: string) => void
+): { content: [{ type: 'text'; text: string }]; isError: true } {
     const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error && err.stack ? `\n${err.stack}` : '';
+    log?.(`[error] ${msg}${stack}`);
     return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
 }
 
