@@ -2111,7 +2111,7 @@ when the tool units land.
 - U12 — `get_console`/`clear_console` in `src/tools/diagnostic.ts`; Mechanism B (in-page injection via `page.evaluate`, idempotent re-inject on every `get_console`); auto-inject fire-and-forget in `open_browser_page`; 44 tests passing
 - U16 — `src/test/integration/tier-b.test.ts` (eval_js), `tier-c.test.ts` (screenshot_page), `tier-d.test.ts` (markdown), `tier-e.test.ts` (get_console); shared `_helpers.ts` McpTestClient on port 3198; graceful skip when browser unavailable; DEVELOPMENT.md CI section added
 
-### ▶ NEXT: Phase 5 — U17 (hybrid CDP), then U14, U15
+### ▶ NEXT: Phase 6 — U13 (cleanup), then U14/U15 gates
 
 ### Phase 5 — Cross-cutting features
 
