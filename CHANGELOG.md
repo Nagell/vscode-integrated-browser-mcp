@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.3.0...vscode-integrated-browser-mcp-v0.4.0) (2026-05-28)
+
+
+### Features
+
+* **extension:** auto-prompt CDP setup on first activation ([9319174](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/931917443410d199e91efff63976a37e70f7b126))
+* first-run CDP prompt and publish script fix ([60ef387](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/60ef3876fcbf73114809631989b50455404aee81))
+
+
+### Bug Fixes
+
+* **publish:** add --allow-proposed-apis browser to vsce publish script ([74cb608](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/74cb6086c9943d1d82bbbeafa5b964fd2b2684b5))
+
 ## [0.3.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.2.0...vscode-integrated-browser-mcp-v0.3.0) (2026-05-28)
 
 
