@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.2.0...vscode-integrated-browser-mcp-v0.3.0) (2026-05-28)
+
+
+### Features
+
+* add probe command for run_playwright_code experimentation ([544b937](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/544b937b6123cb600d2ea4868bb92df0781f388e))
+* tools expansion, CDP layer, and dev-mode isolation ([b065c06](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/b065c06e5d9875b80ff2fa7a8b815e59b2d375c4))
+* **tools:** add Tier A (hover, drag, dialog) and Tier B (eval_js, get_dom, scroll, emulate, get_url) tools ([29fbc5e](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/29fbc5eb5b20e6315de0344f9280e7927ec3a28b))
+* **U10:** add screenshot_slice tool with Pythonic negative indexing ([2ccc104](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/2ccc104b7cc315017aca3ea888fdf165642717c1))
+* **U11:** add markdown tool with inline DOM walker ([a96a9f3](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/a96a9f33944ad3673a885b31a72028857421e056))
+* **U12:** add get_console and clear_console tools with auto-inject ([75aa20a](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/75aa20a5b618e0da38ffd61876454fa98091e6db))
+* **U16:** add per-Tier integration tests and CI test environment docs ([08732c6](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/08732c606d7519ea01ca83655d78ae9cb6813ab3))
+* **U17:** add hybrid CDP layer, dev-mode isolation, and tool manual test ([f399312](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/f3993120b05ae70568bd67657335542a48111206))
+* **U4:** add extractRpcResult, decodeBuffer, runPlaywrightCode helpers and startup parse probe ([b987362](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/b98736258e207c671a3f872c9406293a19c4ddb4))
+* **U5:** auto-register MCP entry in Claude Code config on activation ([d5ba257](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/d5ba257063cda2eba7da00b7228dc52aa915db5e))
+* **U6:** add attach_visible_page and list_visible_pages tools ([c564db3](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/c564db39a3270175dcf2210f39e11f782f976a0a))
+* **U9:** extend screenshot_page with fullPage and waitMs options ([f12abda](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/f12abdab94f077d6b06699a95e4b418de444b964))
+
+
+### Bug Fixes
+
+* **extension:** handle EADDRINUSE in startServer command handler ([c3e35f0](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/c3e35f00f15f3445195b339d8bfe23a96095c584))
+* **extension:** write enableCdp to all candidate argv.json paths ([c3d29c6](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/c3d29c6c30f77a1a41afbf252d930b896572355f))
+* **tests:** prevent VS Code notifications from pausing browser during tests ([ba3972f](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/ba3972f129c7cb67a47870448dfc79a379c651a5))
+* **U7/U12:** correct drag_element and handle_dialog VS Code parameter names ([3b856d5](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/3b856d5bf4122c67461a4e516e35debb52f995a9))
+
 ## [0.2.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.1.3...vscode-integrated-browser-mcp-v0.2.0) (2026-05-18)
 
 
