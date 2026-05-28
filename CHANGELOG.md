@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.1...vscode-integrated-browser-mcp-v0.4.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **ci:** correct vsce package/publish flags for proposed APIs ([2691b81](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/2691b81d46711df82bd77a3a858f26c8af7b4831))
+* **ci:** remove proposed-api flag from vsce package, use --packagePath for publish ([1bd8e99](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/1bd8e9974a3297e72d1c885955198a2a50b81c14))
+
 ## [0.4.1](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.0...vscode-integrated-browser-mcp-v0.4.1) (2026-05-28)
 
 
