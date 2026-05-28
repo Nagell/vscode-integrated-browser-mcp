@@ -19,18 +19,26 @@ const BROWSER_TOOLS = {
 
 let cdpManager: CdpManager | undefined;
 let cdpFallbackLogged = false;
+let output: vscode.OutputChannel | undefined;
 
 export function setCdpManager(manager: CdpManager): void {
     cdpManager = manager;
 }
 
-function logCdpFallback(err: unknown): void {
+export function setOutput(channel: vscode.OutputChannel): void {
+    output = channel;
+}
+
+function log(msg: string): void {
+    output?.appendLine(msg);
+}
+
+function logCdpFallback(err: unknown, op?: string): void {
+    const context = op ? ` (${op})` : '';
+    log(`[cdp]${context} error: ${err instanceof Error ? err.message : String(err)} — falling back to invokeTool`);
     if (!cdpFallbackLogged) {
         cdpFallbackLogged = true;
-        console.warn(
-            '[cdp] CDP unavailable — falling back to invokeTool (consent dialogs will appear). ' +
-            'Run "Integrated Browser MCP: Enable CDP" to set up.', err
-        );
+        log('[cdp] Consent dialogs will appear on first tool use. Run "Integrated Browser MCP: Enable CDP" to disable them.');
     }
 }
 

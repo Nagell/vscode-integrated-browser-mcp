@@ -97,6 +97,7 @@ async function doEnableCdp(argvPaths: string[], out: vscode.OutputChannel): Prom
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
     server = new McpBridgeServer(output);
+    bridge.setOutput(output);
 
     const isDev = context.extensionMode === vscode.ExtensionMode.Development;
     const cfg = vscode.workspace.getConfiguration('integratedBrowserMcp');
