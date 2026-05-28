@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.0...vscode-integrated-browser-mcp-v0.4.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **ci:** PAT for release-please, allow-all-proposed-apis, skip VS Code deps ([7443453](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/7443453c9fecf235fa0958bb55d91d359b1dbf86))
+* **ci:** switch to --allow-all-proposed-apis for vsce package and publish ([7250742](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/7250742d4905968cbb12e1a5098b3539e6831c06))
+
 ## [0.4.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.3.0...vscode-integrated-browser-mcp-v0.4.0) (2026-05-28)
 
 
