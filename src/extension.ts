@@ -61,6 +61,39 @@ function parseArgvJson(raw: string): Record<string, unknown> {
     return JSON.parse(raw.replace(/\/\/[^\n]*/g, '')) as Record<string, unknown>;
 }
 
+async function doEnableCdp(argvPaths: string[], out: vscode.OutputChannel): Promise<boolean> {
+    const extId = 'Nagell.vscode-integrated-browser-mcp';
+    let wrote = 0;
+    for (const argvPath of argvPaths) {
+        let existing: Record<string, unknown> = {};
+        try {
+            existing = parseArgvJson(fs.readFileSync(argvPath, 'utf-8'));
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                out.appendLine(`[enableCdp] skipping ${argvPath}: ${err}`);
+                continue;
+            }
+        }
+        const current = Array.isArray(existing['enable-proposed-api'])
+            ? (existing['enable-proposed-api'] as string[])
+            : [];
+        if (current.includes(extId)) { wrote++; continue; }
+        const merged = { ...existing, 'enable-proposed-api': [...current, extId] };
+        const tmpPath = `${argvPath}.tmp-${process.pid}`;
+        try {
+            fs.mkdirSync(path.dirname(argvPath), { recursive: true });
+            fs.writeFileSync(tmpPath, JSON.stringify(merged, null, '\t') + '\n', 'utf-8');
+            fs.renameSync(tmpPath, argvPath);
+            out.appendLine(`[enableCdp] wrote enable-proposed-api to ${argvPath}`);
+            wrote++;
+        } catch (err) {
+            try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+            out.appendLine(`[enableCdp] could not write to ${argvPath}: ${err}`);
+        }
+    }
+    return wrote > 0;
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
     server = new McpBridgeServer(output);
@@ -178,36 +211,8 @@ export async function activate(context: vscode.ExtensionContext) {
             );
             if (choice !== 'Enable') { return; }
 
-            let wrote = 0;
-            for (const argvPath of argvPaths) {
-                let existing: Record<string, unknown> = {};
-                try {
-                    existing = parseArgvJson(fs.readFileSync(argvPath, 'utf-8'));
-                } catch (err) {
-                    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-                        output?.appendLine(`[enableCdp] skipping ${argvPath}: ${err}`);
-                        continue;
-                    }
-                }
-                const current = Array.isArray(existing['enable-proposed-api'])
-                    ? (existing['enable-proposed-api'] as string[])
-                    : [];
-                if (current.includes(extId)) { wrote++; continue; }
-                const merged = { ...existing, 'enable-proposed-api': [...current, extId] };
-                const tmpPath = `${argvPath}.tmp-${process.pid}`;
-                try {
-                    fs.mkdirSync(path.dirname(argvPath), { recursive: true });
-                    fs.writeFileSync(tmpPath, JSON.stringify(merged, null, '\t') + '\n', 'utf-8');
-                    fs.renameSync(tmpPath, argvPath);
-                    output?.appendLine(`[enableCdp] wrote enable-proposed-api to ${argvPath}`);
-                    wrote++;
-                } catch (err) {
-                    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-                    output?.appendLine(`[enableCdp] could not write to ${argvPath}: ${err}`);
-                }
-            }
-
-            if (wrote > 0) {
+            const success = await doEnableCdp(argvPaths, output!);
+            if (success) {
                 void vscode.window.showInformationMessage('Restart VS Code to enable dialog-free browser tools.');
             } else {
                 void vscode.window.showErrorMessage('Integrated Browser MCP: could not write to any argv.json location.');
@@ -216,6 +221,29 @@ export async function activate(context: vscode.ExtensionContext) {
 
         output,
     );
+
+    // First-run prompt: offer CDP setup when the API is not yet active.
+    // Skipped in dev/test mode (isDev) and after the user has already responded.
+    if (!isDev && typeof win['browserTabs'] === 'undefined') {
+        const prompted = context.globalState.get<boolean>('cdpSetupPromptShown', false);
+        if (!prompted) {
+            void context.globalState.update('cdpSetupPromptShown', true);
+            void vscode.window.showInformationMessage(
+                'Enable dialog-free browser tools? This modifies argv.json and requires a VS Code restart.',
+                'Enable',
+                'Not now'
+            ).then(choice => {
+                if (choice !== 'Enable') { return; }
+                doEnableCdp(collectArgvPaths(), output!).then(success => {
+                    if (success) {
+                        void vscode.window.showInformationMessage('Restart VS Code to enable dialog-free browser tools.');
+                    } else {
+                        void vscode.window.showErrorMessage('Integrated Browser MCP: could not write to any argv.json location.');
+                    }
+                }).catch(() => { /* ignore */ });
+            });
+        }
+    }
 }
 
 export async function deactivate() {
