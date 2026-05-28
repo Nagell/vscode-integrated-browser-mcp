@@ -71,7 +71,7 @@
     "pretest": "pnpm run compile && pnpm run lint",
     "test": "vscode-test",
     "lint": "eslint src",
-    "publish": "vsce publish --no-dependencies --allow-proposed-apis browser"
+    "publish": "vsce publish --no-dependencies --allow-all-proposed-apis"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
