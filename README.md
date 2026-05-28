@@ -19,9 +19,9 @@
     <a href="./docs/DEVELOPMENT.md"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new?labels=bug&template=bug_report.md">Report Bug</a>
     ·
-    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new">Request Feature</a>
   </p>
 </div>
 
@@ -97,8 +97,9 @@ Works with any agent that supports the MCP streamable HTTP transport running on 
 4. Connect your MCP client — see the sections below for your agent.
 
 > [!NOTE]
-> VS Code may show a confirmation dialog when opening or closing a page.  
-> Click **Allow** to proceed. Read, screenshot, navigate, click, and type operations run without interruption.
+> VS Code shows a consent dialog the first time each tool is used in a session. Click **Allow** to proceed — subsequent calls in the same session run silently.
+>
+> To eliminate dialogs entirely, run **Integrated Browser MCP: Enable CDP** from the Command Palette after installation. It modifies `argv.json` and requires a VS Code restart.
 
 ### Claude Code
 
@@ -169,16 +170,52 @@ mcpServers:
 <!-- AVAILABLE TOOLS -->
 ## Available Tools
 
+### Page management
+
 | Tool | Description |
 | --- | --- |
-| `open_browser_page` | Open a URL in the Integrated Browser. Returns a `pageId` required by all other tools. Always pass a `url` — if the page is already open, VS Code will simply navigate to it. Pass `forceNew: true` to open a second tab. |
-| `read_page` | Read the current page content as an accessibility tree (title, URL, element refs). |
-| `screenshot_page` | Take a screenshot of the page or a specific element (`ref` or `selector`). |
-| `navigate_page` | Navigate to a URL, or go `back` / `forward` / `reload`. |
-| `click_element` | Click an element. Provide `element` (human description) plus `ref` from a snapshot or a `selector`. |
-| `type_in_page` | Type text or press a key (e.g. `"Enter"`, `"Control+a"`). Target with `ref` or `selector`. |
-| `list_pages` | List all pages opened in this session with their page IDs and URLs. |
+| `open_browser_page` | Open a URL. Returns a `pageId` required by all other tools. Pass `forceNew: true` to open a second tab. |
+| `list_pages` | List all pages opened in this session with their IDs and URLs. |
 | `close_page` | Close a page and remove it from the session. |
+| `navigate_page` | Navigate to a URL, or go `back` / `forward` / `reload`. |
+| `get_url` | Get the current URL of a page. |
+| `list_visible_pages` | List browser tabs currently visible in VS Code (not limited to this session). |
+| `attach_visible_page` | Attach a visible tab to the session by URL, returning a `pageId`. |
+
+### Reading
+
+| Tool | Description |
+| --- | --- |
+| `read_page` | Read the page as an accessibility tree (title, URL, element refs). |
+| `get_dom` | Get raw HTML of the page or a specific element (`selector`). |
+| `markdown` | Extract page content as clean Markdown. Optionally scope to a CSS `selector`. |
+| `eval_js` | Evaluate a JavaScript expression and return the result. |
+
+### Interaction
+
+| Tool | Description |
+| --- | --- |
+| `click_element` | Click an element by `ref` (from `read_page`) or `selector`. |
+| `type_in_page` | Type text or press a key (e.g. `"Enter"`, `"Control+a"`). Target with `ref` or `selector`. |
+| `hover_element` | Hover over an element. |
+| `drag_element` | Drag from one element to another. |
+| `handle_dialog` | Accept or dismiss a browser dialog (alert / confirm / prompt). |
+| `scroll` | Scroll by a delta or to an absolute position. |
+
+### Visual
+
+| Tool | Description |
+| --- | --- |
+| `screenshot_page` | Take a screenshot. Supports `fullPage`, `waitMs`, `ref`, and `selector`. |
+| `screenshot_slice` | Take a viewport-sized screenshot of a specific scroll slice (supports negative indexing). |
+| `emulate` | Set the browser viewport size. |
+
+### Console
+
+| Tool | Description |
+| --- | --- |
+| `get_console` | Read captured `console.log / warn / error / info / debug` output. Filter by `levels`. |
+| `clear_console` | Clear the console capture buffer. |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -201,7 +238,8 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 | --- | --- |
 | `Integrated Browser MCP: Start Server` | Start the MCP server manually. Useful when `autoStart` is disabled. |
 | `Integrated Browser MCP: Stop Server` | Stop the running MCP server. |
-| `Integrated Browser MCP: List Available LM Tools (debug)` | Print all LM tools registered in VS Code to the *Browser MCP Debug* output channel. Helpful for verifying that the browser tools are active when troubleshooting connection issues. |
+| `Integrated Browser MCP: Enable CDP (dialog-free browser tools)` | Writes `enable-proposed-api` to `argv.json` so all browser tools run without consent dialogs after a VS Code restart. |
+| `Integrated Browser MCP: List Available LM Tools (debug)` | Print all LM tools registered in VS Code to the *Browser MCP Debug* output channel. Helpful for verifying that the browser tools are active when troubleshooting. |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -219,13 +257,15 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 
 - [x] MCP HTTP server with stateful session management
 - [x] Browser bridge via `vscode.lm.invokeTool`
-- [x] `open_browser_page`, `read_page`, `screenshot_page`
-- [x] `navigate_page` (url / back / forward / reload)
-- [x] `click_element`, `type_in_page`
-- [x] `list_pages`, `close_page`
-- [x] Multi-tab support via `forceNew`
-- [ ] Auto-configure `~/.claude.json` on first activation
-- [ ] Element selection push — intercept VS Code's browser element picker and forward the payload to Claude Code via MCP server-sent events
+- [x] Page management: `open_browser_page`, `list_pages`, `close_page`, `navigate_page`, `get_url`, `list_visible_pages`, `attach_visible_page`
+- [x] Reading: `read_page`, `get_dom`, `markdown`, `eval_js`
+- [x] Interaction: `click_element`, `type_in_page`, `hover_element`, `drag_element`, `handle_dialog`, `scroll`
+- [x] Visual: `screenshot_page` (fullPage / waitMs), `screenshot_slice`, `emulate`
+- [x] Console capture: `get_console`, `clear_console`
+- [x] CDP layer — dialog-free tool execution when proposed `browser` API is available
+- [x] Auto-configure `~/.claude.json` on first activation
+- [x] One-click CDP setup via `Enable CDP` command
+- [ ] Element selection push — intercept VS Code's browser element picker and forward the ref to the agent via MCP server-sent events
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

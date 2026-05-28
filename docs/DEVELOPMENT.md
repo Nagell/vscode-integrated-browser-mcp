@@ -12,15 +12,7 @@
   - [Running the extension](#running-the-extension)
   - [Testing](#testing)
     - [Automated tests](#automated-tests)
-    - [Manual integration tests](#manual-integration-tests)
-      - [TC1 — open + read + screenshot](#tc1--open--read--screenshot)
-      - [TC2 — navigate to URL](#tc2--navigate-to-url)
-      - [TC3 — back / forward / reload](#tc3--back--forward--reload)
-      - [TC4 — click\_element by ref](#tc4--click_element-by-ref)
-      - [TC5 — type\_in\_page + key](#tc5--type_in_page--key)
-      - [TC6 — forceNew + list\_pages](#tc6--forcenew--list_pages)
-      - [TC7 — screenshot with element ref](#tc7--screenshot-with-element-ref)
-      - [TC8 — close\_page + list\_pages](#tc8--close_page--list_pages)
+    - [CI test environment](#ci-test-environment)
   - [Troubleshooting](#troubleshooting)
   - [Known limitations](#known-limitations)
 
@@ -46,14 +38,21 @@ VS Code Extension Host
        └─ DELETE /mcp ─ session teardown
        └─ GET  /health ─ liveness check
 
-  └─ BrowserBridge
-       └─ vscode.lm.invokeTool('open_browser_page', ...)
-       └─ vscode.lm.invokeTool('screenshot_page', ...)
-       └─ ... (all 8 tools)
-            │
-            ▼
-         VS Code's built-in browser agent tools
-         (same tools Copilot uses internally)
+  └─ Tool registrars (src/tools/)
+       page.ts        — open, list, close, navigate, get_url, attach, list_visible
+       interaction.ts — click, type, hover, drag, handle_dialog, scroll
+       visual.ts      — screenshot_page, screenshot_slice, emulate
+       content.ts     — read_page, get_dom, markdown, eval_js
+       diagnostic.ts  — get_console, clear_console
+
+  └─ BrowserBridge (src/browserBridge.ts)
+       CDP path (preferred, no dialogs):
+         └─ CdpManager → CdpSession → Chrome DevTools Protocol
+              Runtime.evaluate, Page.captureScreenshot, Emulation.*
+       invokeTool fallback (consent dialogs on first use per session):
+         └─ vscode.lm.invokeTool('open_browser_page', ...)
+         └─ vscode.lm.invokeTool('run_playwright_code', ...)
+         └─ ... (VS Code's built-in browser agent tools)
 
 MCP client (Claude Code, Cline, Continue.dev, …)
   └─ http://localhost:3100/mcp
@@ -195,110 +194,6 @@ pnpm test --grep "Tier B"
 1. `workbench.browser.enableChatTools: true` is set in `src/test/workspace/.vscode/settings.json`
 2. The `lm-tool-availability` test is green (tools are registered)
 3. `open_browser_page` is present in `vscode.lm.tools` but `invokeTool` fails — VS Code may require a panel to be opened first; add `vscode.commands.executeCommand('simpleBrowser.show', 'about:blank')` to `suiteSetup` in `_helpers.ts` if needed
-
-<p align="right">(<a href="#development-top">back to top</a>)</p>
-
-### Manual integration tests
-
-Run these prompts in sequence inside a `claude` session opened from the dev host terminal. Each test depends on state from the previous one.
-
----
-
-#### TC1 — open + read + screenshot
-
-```
-Open https://example.com in the integrated browser.
-Read the page and take a screenshot. Report the pageId,
-confirm the heading "Example Domain" appears, and confirm the screenshot renders.
-```
-
-**Expected:** pageId returned, heading found, screenshot displayed.  
-**If failing:** Check `workbench.browser.enableChatTools: true` is set. Open the Integrated Browser panel. Check the output channel for errors.
-
----
-
-#### TC2 — navigate to URL
-
-```
-Using the pageId from TC1, navigate to https://en.wikipedia.org/wiki/Main_Page.
-Read the page and confirm the title contains "Wikipedia".
-```
-
-**Expected:** Title includes "Wikipedia, the free encyclopedia".
-
----
-
-#### TC3 — back / forward / reload
-
-```
-Go back in the browser. Confirm we are back at example.com.
-Go forward. Confirm we are at Wikipedia again.
-Reload the page. Confirm it still shows Wikipedia.
-```
-
-**Expected:** All three transitions succeed.
-
----
-
-#### TC4 — click_element by ref
-
-```
-Read the current Wikipedia page to get element refs.
-Find a link and click it using its ref value.
-Read the page after clicking to confirm navigation happened.
-```
-
-**Expected:** Page content changes after click.  
-**If failing:** The `element` field (human description) is required alongside `ref`. If Claude omits it, VS Code rejects the call.
-
----
-
-#### TC5 — type_in_page + key
-
-```
-Navigate to https://duckduckgo.com.
-Read the page to find the search input ref.
-Type "MCP protocol" into it, then press Enter.
-Screenshot the results page.
-```
-
-**Expected:** Search results rendered, screenshot shows results.  
-**If failing:** Try `selector: "input[name=q]"` instead of `ref` if the ref has changed.
-
----
-
-#### TC6 — forceNew + list_pages
-
-```
-Open https://example.org in a new tab (forceNew: true).
-List all pages. Confirm two distinct pageIds and URLs are returned.
-```
-
-**Expected:** Two pageIds listed.  
-**If failing:** If only one pageId is returned, VS Code may have reused the existing tab. Check the output channel.
-
----
-
-#### TC7 — screenshot with element ref
-
-```
-On the example.org page, read the page to get element refs.
-Take a screenshot of just the heading element using its ref.
-```
-
-**Expected:** Cropped screenshot shows only the heading.
-
----
-
-#### TC8 — close_page + list_pages
-
-```
-Close the example.org page.
-List all pages. Confirm only one pageId remains.
-```
-
-**Expected:** One pageId in the list, response says "Page … removed from session."  
-**If failing:** If the browser tab was already closed externally (e.g. by switching focus during a permission dialog), `close_page` still succeeds and removes the entry from the session. If VS Code cannot close the tab programmatically, the response will include "(browser tab may still be visible)" but `isError` is not set.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 
