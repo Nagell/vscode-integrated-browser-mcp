@@ -2111,49 +2111,20 @@ when the tool units land.
 - U12 — `get_console`/`clear_console` in `src/tools/diagnostic.ts`; Mechanism B (in-page injection via `page.evaluate`, idempotent re-inject on every `get_console`); auto-inject fire-and-forget in `open_browser_page`; 44 tests passing
 - U16 — `src/test/integration/tier-b.test.ts` (eval_js), `tier-c.test.ts` (screenshot_page), `tier-d.test.ts` (markdown), `tier-e.test.ts` (get_console); shared `_helpers.ts` McpTestClient on port 3198; graceful skip when browser unavailable; DEVELOPMENT.md CI section added
 
-### ▶ NEXT: Phase 6 — U13 (cleanup), then U14/U15 gates
+### Phase 5 — Cross-cutting features ✅ COMPLETE (2026-05-28)
 
-### Phase 5 — Cross-cutting features
-
-**Pre-flight gates (run before implementing the units they gate):**
-
-1. **U17 gate** (≈30 min, blocks all U17 code): ~~`onDidStartDebugSession` approach~~
-   **failed (2026-05-26)** — Simple Browser is a WebView, not a debug session. Revised gate:
-   verify the `--remote-debugging-port` approach — add `"remote-debugging-port": 9222` to
-   `argv.json`, restart VS Code, confirm the Simple Browser appears in `/json/list`, and
-   that `Runtime.evaluate` succeeds over WebSocket. See U17 Approach for the full checklist.
-2. **U14 gate** (≈30 min, blocks U14 architecture): Start a real Claude Code session, fire a
-   no-op `transport.send()`, and confirm receipt. If Claude Code does not hold the `GET /mcp`
-   SSE stream open, U14 must be redesigned as a pull/polling model (`get_element_selection`
-   tool) before any broadcast plumbing is written.
-
-- U17 (hybrid CDP — replace `run_playwright_code` with `Runtime.evaluate`) — eliminates
-  per-unique-script consent dialogs; depends on all Tier B/C/D/E units (U8–U12); ships first
-- U14 (element selection push) — depends on U2; investigation-led; **run gate 2 first**
+- ~~U17 gate~~ — passed (2026-05-27) via VS Code proposed `browser` API
+- U17 ✅ COMPLETE (2026-05-28)
+- U14 (element selection push) — **gate still required** before implementation (see U14 unit)
 - U15 (multi-window support) — depends on U2, U5
 
-U17 is highest priority — it unblocks real-world usability. U14 and U15 can follow in either order.
-
-**Release note:**
-
-- **Tier A tools** (`hover_element`, `drag_element`, `handle_dialog`, `close_page` — U5/U7)
-  can ship independently. They use dedicated VS Code LM tools with one consent dialog per
-  VS Code session, then run silently.
-- **Tier B/C/D/E tools** (U8–U12): do not cut a release without U17 **unless** the
-  `--remote-debugging-port` gate experiment fails (see U17 Approach). As shipped, every
-  distinct `run_playwright_code` code string triggers its own consent dialog; releasing
-  Phase 4 without Phase 5 means users experience maximum dialog friction on the new tool
-  surface.
-- **Contingency (if U17 gate fails):** Tier B/C/D/E tools may ship with an explicit
-  Known Limitations entry: *"Tier B/C/D/E tools require one VS Code consent dialog per
-  unique script call (VS Code limitation). A future update will eliminate these dialogs."*
-  In that case, document the friction clearly in the README before publishing.
+### ▶ NEXT: Phase 6 — U13 (cleanup), then U14/U15 (after gates)
 
 ### Phase 6 — Cleanup
 
 - U13 (remove probe, refresh docs)
 
-Lands last, after every Phase 4 and Phase 5 unit is merged.
+Lands after every Phase 4 and Phase 5 unit is merged.
 
 ---
 
