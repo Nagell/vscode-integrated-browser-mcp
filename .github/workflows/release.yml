@@ -22,7 +22,7 @@ jobs:
     name: Release Please
     runs-on: ubuntu-latest
     # Skip on manual triggers and when release-please itself pushes the release commit
-    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor != 'github-actions[bot]'
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -35,7 +35,7 @@ jobs:
   publish:
     name: Publish to VS Code Marketplace
     needs: release-please
-    if: always() && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
