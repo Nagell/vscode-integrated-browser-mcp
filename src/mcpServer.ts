@@ -147,11 +147,6 @@ export class McpBridgeServer {
             this._httpServer = server;
 
             server.on('error', (err: NodeJS.ErrnoException) => {
-                if (err.code === 'EADDRINUSE') {
-                    vscode.window.showErrorMessage(`Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`);
-                } else {
-                    vscode.window.showErrorMessage(`Integrated Browser MCP: failed to start (${err.code ?? err.message}).`);
-                }
                 reject(err);
             });
 

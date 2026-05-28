@@ -18,6 +18,8 @@ suite('Integration: Tier C — screenshot_page', () => {
 
     test('screenshot_page returns a JPEG image', async () => {
         if (!pageId) { return; }
+        // about:blank renders nothing; inject content so VS Code produces non-empty image data
+        await client.call('eval_js', { pageId, expression: `document.body.style.background='#fff'; document.body.innerHTML='<h1>screenshot test</h1>';` });
         const result = await client.call('screenshot_page', { pageId });
         assert.ok(!result.isError, `unexpected error: ${result.content[0]?.text}`);
         const img = result.content.find(c => c.type === 'image');

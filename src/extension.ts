@@ -102,8 +102,9 @@ export async function activate(context: vscode.ExtensionContext) {
             });
         } catch (err) {
             output.appendLine(`Failed to start MCP server: ${err}`);
-            // EADDRINUSE already shows a specific message from the server error handler.
-            if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+            if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+                vscode.window.showErrorMessage(`Integrated Browser MCP: port ${port} is already in use. Change the port in settings.`);
+            } else {
                 vscode.window.showErrorMessage(`Integrated Browser MCP: failed to auto-start — ${(err as Error).message ?? String(err)}`);
             }
         }
