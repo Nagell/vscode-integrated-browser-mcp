@@ -247,7 +247,6 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 ## Known Limitations
 
 - **`list_pages` URL is stale after in-page navigation** — link clicks and form submissions don't update the stored URL. Use `get_url` or `read_page` for the live URL.
-- **VS Code in WSL + Claude Code running natively on Windows** — auto-configuration writes to the WSL home (`~/.claude.json`), which Windows-native Claude Code does not read. Add the entry manually to `%APPDATA%\Claude\claude.json` on the Windows side.
 - **No multi-window support** — tool calls always target the browser in the window where the extension activated.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

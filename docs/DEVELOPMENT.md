@@ -45,6 +45,11 @@ VS Code Extension Host
        content.ts     — read_page, get_dom, markdown, eval_js
        diagnostic.ts  — get_console, clear_console
 
+  └─ Utilities (src/util/)
+       mcpResult.ts    — errContent, parseContractGuard response helpers
+       platformPaths.ts — collectArgvJsonPaths, collectClaudeConfigPaths
+                          (enumerate Windows + all WSL distro homes via wsl.exe)
+
   └─ BrowserBridge (src/browserBridge.ts)
        CDP path (preferred, no dialogs):
          └─ CdpManager → CdpSession → Chrome DevTools Protocol
