@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.2...vscode-integrated-browser-mcp-v0.5.0) (2026-05-29)
+
+
+### Features
+
+* **install:** extract platform path utils, add multi-path config with WSL support ([ce02c2d](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/ce02c2dbafbdeb3a62e6358c57e843e50e62d2e4))
+* **logging:** route CDP fallback errors to output channel with context ([54ea722](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/54ea722e9f4f348c43366e7d713737b7851b8479))
+* tools expansion, CDP layer, logging, and multi-path WSL config ([0ce932b](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/0ce932bf6bf79d391aa4fa948c14136fa45afe74))
+
+
+### Bug Fixes
+
+* **logging:** log all tool errors with stack trace to output channel ([99dbca5](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/99dbca5fb6b40d6da149f2b57026c007ed90f705))
+
 ## [0.4.2](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.1...vscode-integrated-browser-mcp-v0.4.2) (2026-05-28)
 
 
