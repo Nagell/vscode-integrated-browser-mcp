@@ -29,7 +29,7 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
             return { content: [{ type: 'text', text: `pageId: ${pageId}` }, ...content] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] open_browser_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -83,7 +83,7 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
             return { content };
         } catch (err) {
             output.appendLine(`[error] navigate_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 
@@ -130,7 +130,7 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
             return { content: [{ type: 'text', text: `pageId: ${pageId}` }, ...content] as McpContent[] };
         } catch (err) {
             output.appendLine(`[error] attach_visible_page: ${err}`);
-            return errContent(err);
+            return errContent(err, msg => ctx.output.appendLine(msg));
         }
     });
 }
