@@ -21,7 +21,7 @@
     <br />
     <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new?labels=bug&template=bug_report.md">Report Bug</a>
     ·
-    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new">Request Feature</a>
+    <a href="https://github.com/Nagell/vscode-integrated-browser-mcp/issues/new?labels=enhancement&template=feature_request.md">Request Feature</a>
   </p>
 </div>
 
