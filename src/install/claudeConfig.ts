@@ -2,15 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-
-function resolveConfigPath(): string {
-    if (process.platform === 'win32') {
-        return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude', 'claude.json');
-    }
-    const envDir = process.env.CLAUDE_CONFIG_DIR;
-    if (envDir) { return path.join(envDir, 'claude.json'); }
-    return path.join(os.homedir(), '.claude.json');
-}
+import { collectClaudeConfigPaths } from '../util/platformPaths.js';
 
 function safeguardPath(configPath: string, output: vscode.OutputChannel): string | undefined {
     let stat: fs.Stats;
@@ -83,6 +75,21 @@ export function mergeEntry(existing: Record<string, unknown>, mcpUrl: string, se
     };
 }
 
+function writeConfig(configPath: string, config: Record<string, unknown>, output: vscode.OutputChannel): Error | undefined {
+    const tmpPath = `${configPath}.tmp-${process.pid}`;
+    try {
+        fs.mkdirSync(path.dirname(configPath), { recursive: true });
+        fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+        fs.renameSync(tmpPath, configPath);
+        output.appendLine(`[claudeConfig] wrote MCP entry to ${configPath}`);
+        return undefined;
+    } catch (err) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        output.appendLine(`[claudeConfig] write failed for ${configPath}: ${err}`);
+        return err instanceof Error ? err : new Error(String(err));
+    }
+}
+
 export async function ensureClaudeMcpEntry(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
@@ -92,14 +99,15 @@ export async function ensureClaudeMcpEntry(
     if (context.globalState.get('claudeConfig.offered')) { return; }
 
     const mcpUrl = `http://127.0.0.1:${port}/mcp`;
-    const primaryPath = resolveConfigPath();
+    const [primaryPath, ...secondaryPaths] = collectClaudeConfigPaths();
+
     const configPath = safeguardPath(primaryPath, output);
     if (!configPath) { return; }
 
-    let existing: Record<string, unknown> = {};
+    let primaryConfig: Record<string, unknown> = {};
     try {
         const raw = await readWithTimeout(configPath, 5000);
-        existing = JSON.parse(raw) as Record<string, unknown>;
+        primaryConfig = JSON.parse(raw) as Record<string, unknown>;
     } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
             // File absent — proceed with empty config
@@ -116,7 +124,7 @@ export async function ensureClaudeMcpEntry(
         }
     }
 
-    if (alreadyRegistered(existing, mcpUrl)) {
+    if (alreadyRegistered(primaryConfig, mcpUrl)) {
         output.appendLine('[claudeConfig] MCP entry already present, skipping prompt');
         return;
     }
@@ -132,28 +140,45 @@ export async function ensureClaudeMcpEntry(
         return;
     }
 
-    const merged = mergeEntry(existing, mcpUrl, serverName);
     const displayPath = configPath.replace(os.homedir(), '~');
-    const tmpPath = `${configPath}.tmp-${process.pid}`;
-    try {
-        fs.mkdirSync(path.dirname(configPath), { recursive: true });
-        fs.writeFileSync(tmpPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-        fs.renameSync(tmpPath, configPath);
-        await context.globalState.update('claudeConfig.offered', true);
-        output.appendLine(`[claudeConfig] wrote MCP entry to ${configPath}`);
-        void vscode.window.showInformationMessage(
-            `Added to \`${displayPath}\`. Restart Claude Code to pick up the change.`
-        );
-    } catch (err) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore — tmp may not exist */ }
-        output.appendLine(`[claudeConfig] write failed: ${err}`);
-        if ((err as NodeJS.ErrnoException).code === 'EACCES') {
+    const writeErr = writeConfig(configPath, mergeEntry(primaryConfig, mcpUrl, serverName), output);
+
+    if (writeErr) {
+        if ((writeErr as NodeJS.ErrnoException).code === 'EACCES') {
             void vscode.window.showErrorMessage(
                 `Couldn't write to \`${displayPath}\` (permission denied). Check the file's permissions and reload the window to retry.`
             );
-            // Deliberately not setting globalState.offered so the prompt reappears after fixing permissions.
+            // Not setting globalState.offered so the prompt reappears after fixing permissions.
         } else {
             await context.globalState.update('claudeConfig.offered', true);
         }
+        return;
+    }
+
+    await context.globalState.update('claudeConfig.offered', true);
+    void vscode.window.showInformationMessage(
+        `Added to \`${displayPath}\`. Restart Claude Code to pick up the change.`
+    );
+
+    // Secondary paths (e.g. Windows-side when running in WSL) — only update if file exists
+    for (const secPath of secondaryPaths) {
+        try { fs.lstatSync(secPath); } catch { continue; }
+
+        let secConfig: Record<string, unknown> = {};
+        try {
+            secConfig = JSON.parse(fs.readFileSync(secPath, 'utf-8')) as Record<string, unknown>;
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                output.appendLine(`[claudeConfig] skipping ${secPath}: ${err}`);
+                continue;
+            }
+        }
+
+        if (alreadyRegistered(secConfig, mcpUrl)) {
+            output.appendLine(`[claudeConfig] MCP entry already present in ${secPath}, skipping`);
+            continue;
+        }
+
+        writeConfig(secPath, mergeEntry(secConfig, mcpUrl, serverName), output);
     }
 }

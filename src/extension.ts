@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { McpBridgeServer } from './mcpServer.js';
 import * as bridge from './browserBridge.js';
 import { CdpManager } from './cdp/cdpManager.js';
 import { ensureClaudeMcpEntry } from './install/claudeConfig.js';
+import { collectArgvJsonPaths } from './util/platformPaths.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
@@ -38,23 +38,6 @@ function runParseProbe(s: McpBridgeServer, out: vscode.OutputChannel): void {
     }).catch(() => {
         out.appendLine('[startup] parse probe skipped (no browser page ready)');
     });
-}
-
-// Returns all candidate argv.json paths to try. Writes to all of them so the command
-// works on native Linux, WSL (Windows-side file), and native Windows.
-function collectArgvPaths(): string[] {
-    const toWsl = (p: string) => p
-        .replace(/^([A-Za-z]):[/\\]/, (_, d: string) => `/mnt/${d.toLowerCase()}/`)
-        .replace(/\\/g, '/');
-    const candidates: string[] = [];
-    if (process.env.USERPROFILE) {
-        candidates.push(path.join(toWsl(process.env.USERPROFILE), '.vscode', 'argv.json'));
-    }
-    if (process.env.HOMEDRIVE && process.env.HOMEPATH) {
-        candidates.push(path.join(toWsl(`${process.env.HOMEDRIVE}${process.env.HOMEPATH}`), '.vscode', 'argv.json'));
-    }
-    candidates.push(path.join(os.homedir(), '.vscode', 'argv.json'));
-    return [...new Set(candidates)];
 }
 
 function parseArgvJson(raw: string): Record<string, unknown> {
@@ -190,7 +173,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }),
 
         vscode.commands.registerCommand('integratedBrowserMcp.enableCdp', async () => {
-            const argvPaths = collectArgvPaths();
+            const argvPaths = collectArgvJsonPaths();
             const extId = 'Nagell.vscode-integrated-browser-mcp';
 
             const alreadyEnabled = argvPaths.some(p => {
@@ -235,7 +218,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 'Not now'
             ).then(choice => {
                 if (choice !== 'Enable') { return; }
-                doEnableCdp(collectArgvPaths(), output!).then(success => {
+                doEnableCdp(collectArgvJsonPaths(), output!).then(success => {
                     if (success) {
                         void vscode.window.showInformationMessage('Restart VS Code to enable dialog-free browser tools.');
                     } else {
