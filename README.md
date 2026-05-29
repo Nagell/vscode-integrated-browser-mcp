@@ -189,7 +189,7 @@ mcpServers:
 | `read_page` | Read the page as an accessibility tree (title, URL, element refs). |
 | `get_dom` | Get raw HTML of the page or a specific element (`selector`). |
 | `markdown` | Extract page content as clean Markdown. Optionally scope to a CSS `selector`. |
-| `eval_js` | Evaluate a JavaScript expression and return the result. |
+| `eval_js` | Evaluate a JavaScript expression and return the result. Same trust model as the DevTools console — don't pass untrusted input. |
 
 ### Interaction
 

@@ -1669,7 +1669,7 @@ all Tier B/C/D/E units (U8–U12) landed; U17 is a drop-in swap beneath them.
 
 ---
 
-- U13. **Remove debug probe command and refresh docs**
+- U13. **Remove debug probe command and refresh docs** ✅ COMPLETE (2026-05-29)
 
 **Goal:** Strip the `integratedBrowserMcp.probeScreenshotSlice` command from the
 extension and `package.json` `contributes.commands`. Extend `docs/DEVELOPMENT.md`
@@ -2118,11 +2118,11 @@ when the tool units land.
 - U14 (element selection push) — **gate still required** before implementation (see U14 unit)
 - U15 (multi-window support) — depends on U2, U5
 
-### ▶ NEXT: Phase 6 — U13 (cleanup), then U14/U15 (after gates)
+### ~~Phase 6 — Cleanup~~ ✅ COMPLETE (2026-05-29)
 
-### Phase 6 — Cleanup
+- U13 ✅ COMPLETE (2026-05-29) — probe commands already removed in U17; added "Probing a new LM tool" section to DEVELOPMENT.md; updated README eval_js description with trust warning
 
-- U13 (remove probe, refresh docs)
+### ▶ NEXT: U14 (element selection push — gate required), U15 (multi-window — gate required)
 
 Lands after every Phase 4 and Phase 5 unit is merged.
 
