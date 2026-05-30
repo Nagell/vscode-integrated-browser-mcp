@@ -5,6 +5,7 @@ import type { McpContent } from '../util/mcpResult.js';
 import { errContent, parseContractGuard } from '../util/mcpResult.js';
 import { pageIdSchema, selectorSchema } from './_schemas.js';
 import type { ToolContext } from './_context.js';
+import { getCaptured, setCaptured } from '../elementCapture.js';
 
 export function registerContentTools(server: McpServer, ctx: ToolContext): void {
     const { output } = ctx;
@@ -60,6 +61,32 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
             output.appendLine(`[error] markdown: ${err}`);
             return errContent(err, msg => ctx.output.appendLine(msg));
         }
+    });
+
+    server.registerTool('get_element_selection', {
+        description: 'Return the element most recently selected via VS Code\'s built-in ' +
+            '"Add Element to Chat" button (Ctrl+Shift+C) in the Integrated Browser toolbar. ' +
+            'Returns the element\'s tag, text, HTML, and bounding rect. ' +
+            'Returns an informational message when no element has been selected yet.',
+        inputSchema: {}
+    }, () => {
+        output.appendLine('[tool] get_element_selection');
+        const el = getCaptured();
+        if (!el) {
+            return { content: [{ type: 'text', text: 'No element selected. ' +
+                'Use the "Add Element to Chat" button (Ctrl+Shift+C) in the ' +
+                'Integrated Browser toolbar to pick an element, then call this tool.' }] as McpContent[] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(el, null, 2) }] as McpContent[] };
+    });
+
+    server.registerTool('clear_element_selection', {
+        description: 'Clear the element captured by the last "Capture Element" command.',
+        inputSchema: {}
+    }, () => {
+        output.appendLine('[tool] clear_element_selection');
+        setCaptured(null);
+        return { content: [{ type: 'text', text: 'Element selection cleared.' }] as McpContent[] };
     });
 
     server.registerTool('get_dom', {

@@ -51,8 +51,9 @@
         "title": "Integrated Browser MCP: Copy MCP URL"
       },
       {
-        "command": "integratedBrowserMcp.probeSsePush",
-        "title": "Integrated Browser MCP: Probe SSE Push (U14 gate)"
+        "command": "integratedBrowserMcp.pickElement",
+        "title": "Integrated Browser MCP: Pick Element for Agent",
+        "icon": "$(inspect)"
       }
     ],
     "configuration": {

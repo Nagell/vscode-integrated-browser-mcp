@@ -117,7 +117,9 @@ export async function openBrowserPage(url?: string, forceNew?: boolean): Promise
         const tabs = win.browserTabs;
         if (tabs) {
             const norm = (u: string) => u.replace(/\/$/, '');
-            const tab = tabs.find(t => norm(t.url) === norm(url));
+            const matching = tabs.filter(t => norm(t.url) === norm(url));
+            // Use last match: forceNew opens push to the end of the array
+            const tab = matching[matching.length - 1];
             if (tab) { cdpManager.trackTab(pageId, tab); }
         }
     }

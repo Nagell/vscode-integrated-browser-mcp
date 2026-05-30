@@ -166,7 +166,8 @@ export async function ensureClaudeMcpEntry(
         return;
     }
 
-    if (context.globalState.get('claudeConfig.offered')) { return; }
+    const offeredKey = `claudeConfig.offered.${serverName}`;
+    if (context.globalState.get(offeredKey)) { return; }
 
     const choice = await vscode.window.showInformationMessage(
         "Integrated Browser MCP isn't yet registered with Claude Code. Add it now?",
@@ -175,7 +176,7 @@ export async function ensureClaudeMcpEntry(
     );
 
     if (choice !== 'Add') {
-        await context.globalState.update('claudeConfig.offered', true);
+        await context.globalState.update(offeredKey, true);
         return;
     }
 
@@ -187,14 +188,14 @@ export async function ensureClaudeMcpEntry(
             void vscode.window.showErrorMessage(
                 `Couldn't write to \`${displayPath}\` (permission denied). Check the file's permissions and reload the window to retry.`
             );
-            // Not setting globalState.offered so the prompt reappears after fixing permissions.
+            // Not setting offeredKey so the prompt reappears after fixing permissions.
         } else {
-            await context.globalState.update('claudeConfig.offered', true);
+            await context.globalState.update(offeredKey, true);
         }
         return;
     }
 
-    await context.globalState.update('claudeConfig.offered', true);
+    await context.globalState.update(offeredKey, true);
     void vscode.window.showInformationMessage(
         `Added to \`${displayPath}\`. Restart Claude Code to pick up the change.`
     );

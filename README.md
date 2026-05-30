@@ -203,6 +203,13 @@ Replace `<your-token>` with the value from the **Copy MCP URL** command.
 | `get_console` | Read captured `console.log / warn / error / info / debug` output. Filter by `levels`. |
 | `clear_console` | Clear the console capture buffer. |
 
+### Element selection
+
+| Tool | Description |
+| --- | --- |
+| `get_element_selection` | Return the element last captured via the **Pick Element for Agent** button — tag, text, HTML, and bounding rect. The button appears in the bottom-right corner of every browser page. Requires CDP (run **Enable CDP** first). |
+| `clear_element_selection` | Clear the stored element selection. |
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- SETTINGS -->
@@ -225,6 +232,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 | `Integrated Browser MCP: Start Server` | Start the MCP server manually. Useful when `autoStart` is disabled. |
 | `Integrated Browser MCP: Stop Server` | Stop the running MCP server. |
 | `Integrated Browser MCP: Copy MCP URL` | Copy the full MCP server URL (including session token) to the clipboard. Use this to configure Cline, Continue.dev, or other MCP clients. |
+| `Integrated Browser MCP: Pick Element for Agent` | Activates the element picker in the active browser tab (same as clicking the floating **⬡ Pick for Agent** button). Click any element to capture it; retrieve via `get_element_selection`. Requires CDP. |
 | `Integrated Browser MCP: Enable CDP (dialog-free browser tools)` | Writes `enable-proposed-api` to `argv.json` so all browser tools run without consent dialogs after a VS Code restart. |
 | `Integrated Browser MCP: List Available LM Tools (debug)` | Print all LM tools registered in VS Code to the *Browser MCP Debug* output channel. Helpful for verifying that the browser tools are active when troubleshooting. |
 
@@ -234,6 +242,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 ## Known Limitations
 
 - **`list_pages` URL is stale after in-page navigation** — link clicks and form submissions don't update the stored URL. Use `get_url` or `read_page` for the live URL.
+- **`open_browser_page` navigates the existing tab by default** — without `forceNew: true`, VS Code reuses the current Integrated Browser tab instead of opening a new one. Use `forceNew: true` when you need two tabs open simultaneously.
 - **No multi-window support** — tool calls always target the browser in the window where the extension activated.
 - **MCP server security** — the server binds to `127.0.0.1` and requires a session token on all `/mcp` requests. The token is auto-written to `~/.claude.json` on first activation. Do not expose port 3100 externally; any local process that learns the token can invoke `eval_js` and execute arbitrary JavaScript in the browser.
 
@@ -252,7 +261,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 - [x] CDP layer — dialog-free tool execution when proposed `browser` API is available
 - [x] Auto-configure `~/.claude.json` on first activation
 - [x] One-click CDP setup via `Enable CDP` command
-- [ ] Element selection push — intercept VS Code's browser element picker and forward the ref to the agent via MCP server-sent events
+- [x] Element selection — floating "Pick for Agent" button in every browser page; agent retrieves via `get_element_selection`
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

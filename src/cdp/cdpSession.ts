@@ -8,6 +8,7 @@ export interface RawCdpSession {
 export class CdpSession {
     private nextId = 1;
     private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+    private eventListeners = new Map<string, Set<(params: Record<string, unknown>) => void>>();
     private pageSessionId: string | undefined;
     private msgDisposable: { dispose(): void };
     private closeDisposable: { dispose(): void };
@@ -18,8 +19,27 @@ export class CdpSession {
         this.closeDisposable = raw.onDidClose(() => this.onClose());
     }
 
+    onEvent(method: string, listener: (params: Record<string, unknown>) => void): { dispose(): void } {
+        let set = this.eventListeners.get(method);
+        if (!set) { set = new Set(); this.eventListeners.set(method, set); }
+        set.add(listener);
+        return { dispose: () => { set!.delete(listener); } };
+    }
+
     private onMessage(msg: Record<string, unknown>): void {
-        if (msg['id'] === undefined) { return; }
+        if (msg['id'] === undefined) {
+            const method = msg['method'] as string | undefined;
+            if (method) {
+                const listeners = this.eventListeners.get(method);
+                if (listeners) {
+                    const params = (msg['params'] ?? {}) as Record<string, unknown>;
+                    for (const listener of listeners) {
+                        try { listener(params); } catch { /* ignore listener errors */ }
+                    }
+                }
+            }
+            return;
+        }
         const p = this.pending.get(msg['id'] as number);
         if (!p) { return; }
         this.pending.delete(msg['id'] as number);
@@ -35,6 +55,7 @@ export class CdpSession {
         const err = new Error('CDP session closed');
         for (const p of this.pending.values()) { p.reject(err); }
         this.pending.clear();
+        this.eventListeners.clear();
     }
 
     // sessionId === undefined → use pageSessionId; null → root-level (no sessionId in envelope).
@@ -92,6 +113,7 @@ export class CdpSession {
         const err = new Error('CDP session disposed');
         for (const p of this.pending.values()) { p.reject(err); }
         this.pending.clear();
+        this.eventListeners.clear();
         this.msgDisposable.dispose();
         this.closeDisposable.dispose();
         this.raw.close();
