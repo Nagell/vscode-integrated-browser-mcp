@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.5.0...vscode-integrated-browser-mcp-v0.6.0) (2026-05-30)
+
+
+### Features
+
+* **security:** add session token to MCP server ([f8cc23a](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/f8cc23ac662d8521e38f31615e9141ef9264fc86))
+* **security:** add session token to MCP server ([3fc207d](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/3fc207dc01921b943a833426b6ac17acb608fcb4))
+
 ## [0.5.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.4.2...vscode-integrated-browser-mcp-v0.5.0) (2026-05-29)
 
 
