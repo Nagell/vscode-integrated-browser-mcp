@@ -8,6 +8,7 @@
   - [Architecture](#architecture)
   - [Permission dialog scope](#permission-dialog-scope)
   - [Common commands](#common-commands)
+  - [Probing a new LM tool](#probing-a-new-lm-tool)
   - [Project MCP config (.mcp.json)](#project-mcp-config-mcpjson)
   - [Running the extension](#running-the-extension)
   - [Testing](#testing)
@@ -114,6 +115,46 @@ pnpm test
 # Lint
 pnpm run lint
 ```
+
+<p align="right">(<a href="#development-top">back to top</a>)</p>
+
+## Probing a new LM tool
+
+When adding a new VS Code LM tool wrapper, verify the tool's `inputSchema` before writing the zod schema and parameter mapping.
+
+### Step 1 — list registered tools
+
+Run the **Integrated Browser MCP: List Available LM Tools (debug)** command from the Command Palette. The *Browser MCP Debug* output channel will print every tool VS Code has registered, including their names and input schemas. Alternatively, open a terminal in the dev host and ask Claude Code:
+
+```text
+What is the inputSchema for the drag_element LM tool?
+```
+
+Claude Code can call `integratedBrowser/list_pages` (or any no-op tool) to trigger tool discovery and then inspect the schema.
+
+### Step 2 — call the tool via MCP
+
+The fastest way to probe a tool end-to-end is a one-off Mocha test that acts as an MCP client:
+
+```ts
+// src/test/probe-scratch.ts  (delete when done)
+import { callTool } from './integration/_helpers.js';
+
+const result = await callTool('hover_element', { pageId, ref: 'e1' });
+console.log(JSON.stringify(result, null, 2));
+```
+
+Run it with `pnpm test --grep "probe"`. This avoids repeated consent dialogs and keeps the raw VS Code response visible for `extractRpcResult` shape inspection.
+
+### Step 3 — capture the response shape
+
+Log the raw `vscode.LanguageModelToolResult` before calling `extractRpcResult`. Confirm:
+
+- Which index in `content` holds the result text.
+- Whether the result string is JSON-encoded (double-quoted) or plain.
+- Whether it includes `Page Title:` / `URL:` fields that `extractRpcResult` intentionally drops.
+
+The canonical parse path is `extractRpcResult` in [src/browserBridge.ts](../src/browserBridge.ts). Its unit tests in [src/test/extension.test.ts](../src/test/extension.test.ts) document the expected input shapes — add a case there if the new tool produces a different envelope.
 
 <p align="right">(<a href="#development-top">back to top</a>)</p>
 

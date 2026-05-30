@@ -46,6 +46,14 @@ function readWithTimeout(filePath: string, timeoutMs: number): Promise<string> {
     });
 }
 
+function sameEndpoint(u: URL, target: URL): boolean {
+    const sameHost = u.hostname === target.hostname ||
+        (u.hostname === 'localhost' && target.hostname === '127.0.0.1') ||
+        (u.hostname === '127.0.0.1' && target.hostname === 'localhost');
+    return sameHost && u.port === target.port && u.pathname === target.pathname;
+}
+
+// Returns true when an existing entry exactly matches mcpUrl (including token query param).
 export function alreadyRegistered(config: Record<string, unknown>, mcpUrl: string): boolean {
     const servers = config.mcpServers;
     if (typeof servers !== 'object' || servers === null) { return false; }
@@ -56,10 +64,26 @@ export function alreadyRegistered(config: Record<string, unknown>, mcpUrl: strin
         if (typeof url !== 'string') { return false; }
         try {
             const u = new URL(url);
-            const sameHost = u.hostname === target.hostname ||
-                (u.hostname === 'localhost' && target.hostname === '127.0.0.1') ||
-                (u.hostname === '127.0.0.1' && target.hostname === 'localhost');
-            return sameHost && u.port === target.port && u.pathname === target.pathname;
+            return sameEndpoint(u, target) &&
+                u.searchParams.get('token') === target.searchParams.get('token');
+        } catch { return false; }
+    });
+}
+
+// Returns true when an existing entry targets the same host:port:path but has a different
+// (or absent) token — i.e. the entry exists but needs a token update.
+function hasStaleEntry(config: Record<string, unknown>, mcpUrl: string): boolean {
+    const servers = config.mcpServers;
+    if (typeof servers !== 'object' || servers === null) { return false; }
+    const target = new URL(mcpUrl);
+    return Object.values(servers as Record<string, unknown>).some(v => {
+        if (typeof v !== 'object' || v === null) { return false; }
+        const url = (v as Record<string, unknown>).url;
+        if (typeof url !== 'string') { return false; }
+        try {
+            const u = new URL(url);
+            return sameEndpoint(u, target) &&
+                u.searchParams.get('token') !== target.searchParams.get('token');
         } catch { return false; }
     });
 }
@@ -94,11 +118,12 @@ export async function ensureClaudeMcpEntry(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
     port: number,
-    serverName = 'integratedBrowser'
+    serverName = 'integratedBrowser',
+    token?: string
 ): Promise<void> {
-    if (context.globalState.get('claudeConfig.offered')) { return; }
-
-    const mcpUrl = `http://127.0.0.1:${port}/mcp`;
+    const mcpUrl = token
+        ? `http://127.0.0.1:${port}/mcp?token=${token}`
+        : `http://127.0.0.1:${port}/mcp`;
     const [primaryPath, ...secondaryPaths] = collectClaudeConfigPaths();
 
     const configPath = safeguardPath(primaryPath, output);
@@ -128,6 +153,20 @@ export async function ensureClaudeMcpEntry(
         output.appendLine('[claudeConfig] MCP entry already present, skipping prompt');
         return;
     }
+
+    // Existing entry for the same endpoint but without/wrong token — update silently.
+    if (hasStaleEntry(primaryConfig, mcpUrl)) {
+        const displayPath = configPath.replace(os.homedir(), '~');
+        const writeErr = writeConfig(configPath, mergeEntry(primaryConfig, mcpUrl, serverName), output);
+        if (!writeErr) {
+            void vscode.window.showInformationMessage(
+                `Updated \`${displayPath}\` with session token. Restart Claude Code to pick up the change.`
+            );
+        }
+        return;
+    }
+
+    if (context.globalState.get('claudeConfig.offered')) { return; }
 
     const choice = await vscode.window.showInformationMessage(
         "Integrated Browser MCP isn't yet registered with Claude Code. Add it now?",

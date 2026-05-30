@@ -52,13 +52,27 @@ export class McpBridgeServer {
         return (this._httpServer.address() as AddressInfo | null)?.port;
     }
 
-    start(port: number): Promise<void> {
+    start(port: number, token?: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const app = createMcpExpressApp();
 
             app.get('/health', (_req, res) => {
                 res.json({ status: 'ok', sessions: this._sessions.size });
             });
+
+            if (token) {
+                app.use('/mcp', (req, res, next) => {
+                    if (req.query['token'] !== token) {
+                        res.status(401).json({
+                            jsonrpc: '2.0',
+                            error: { code: -32001, message: 'Unauthorized: missing or invalid session token' },
+                            id: null
+                        });
+                        return;
+                    }
+                    next();
+                });
+            }
 
             app.post('/mcp', async (req, res) => {
                 try {
@@ -151,7 +165,10 @@ export class McpBridgeServer {
             });
 
             server.listen(port, '127.0.0.1', () => {
-                this._output.appendLine(`[server] listening on port ${this.port}`);
+                const mcpUrl = token
+                    ? `http://127.0.0.1:${this.port}/mcp?token=${token}`
+                    : `http://127.0.0.1:${this.port}/mcp`;
+                this._output.appendLine(`[server] MCP URL: ${mcpUrl}`);
                 resolve();
             });
         });
