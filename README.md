@@ -248,6 +248,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 
 - **`list_pages` URL is stale after in-page navigation** — link clicks and form submissions don't update the stored URL. Use `get_url` or `read_page` for the live URL.
 - **No multi-window support** — tool calls always target the browser in the window where the extension activated.
+- **MCP server security** — the server binds to `127.0.0.1` and requires a session token on all `/mcp` requests. The token is auto-written to `~/.claude.json` on first activation. Do not expose port 3100 externally; any local process that learns the token can invoke `eval_js` and execute arbitrary JavaScript in the browser.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

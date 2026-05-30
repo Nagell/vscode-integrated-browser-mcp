@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -111,12 +112,21 @@ export async function activate(context: vscode.ExtensionContext) {
         output.appendLine('[cdp] proposed browser API not available — using invokeTool fallback (consent dialogs will appear)');
     }
 
+    // In dev mode skip the token so the committed .mcp.json still works.
+    let token: string | undefined;
+    if (!isDev) {
+        token = context.globalState.get<string>('serverToken');
+        if (!token) {
+            token = randomUUID();
+            await context.globalState.update('serverToken', token);
+        }
+    }
+
     if (autoStart) {
         try {
-            await server.start(port);
-            output.appendLine(`MCP server started on http://127.0.0.1:${port}/mcp`);
+            await server.start(port, token);
             if (isDev) { runParseProbe(server, output); }
-            ensureClaudeMcpEntry(context, output, port, serverName).catch(err => {
+            ensureClaudeMcpEntry(context, output, port, serverName, token).catch(err => {
                 output?.appendLine(`[claudeConfig] unexpected error: ${err}`);
             });
         } catch (err) {
