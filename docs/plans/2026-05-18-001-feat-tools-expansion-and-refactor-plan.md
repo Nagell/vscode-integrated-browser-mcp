@@ -150,13 +150,13 @@ than it needs to be.
   the browsing context (JS, DOM, cookies, storage) to any local process that can reach the
   port. The port is `127.0.0.1`-only by default; do not expose it externally."
 
-- **MCP server no auth + DNS rebinding risk:** The server binds to `127.0.0.1` with no
-  token. Combined with `eval_js`, any local process (or a browser tab exploiting DNS
-  rebinding) can invoke arbitrary JS. Mitigation: add a random session token to the MCP
-  URL written to `~/.claude.json` (e.g. `http://127.0.0.1:<port>/mcp?token=<128-bit>`).
-  Token generation is trivial (`crypto.randomUUID()`); it defeats DNS rebinding and
-  casual process enumeration. **⚠ BLOCKING for first public release** — add session token
-  before publishing to the VS Code Marketplace. Add to Known Limitations in the meantime.
+- ~~**MCP server no auth + DNS rebinding risk:**~~ ✅ RESOLVED (2026-05-29) — session token
+  (`crypto.randomUUID()`) generated on first activation, persisted in `globalState`, enforced
+  as `?token=` on all `/mcp` routes. Token auto-written to `~/.claude.json`; stale entries
+  (token mismatch) silently migrated. Dev mode skips token so committed `.mcp.json` keeps
+  working. Known Limitations updated. `Copy MCP URL` command added for Cline/Continue.dev
+  users. `.mcp.json` removed from repo (gitignored) — static URL was incompatible with
+  per-machine tokens.
 
 - **Console capture exfiltration:** `get_console` buffers all `console.*` output from
   the page and returns it to any MCP session that can reach the server. Pages may log
@@ -2122,7 +2122,18 @@ when the tool units land.
 
 - U13 ✅ COMPLETE (2026-05-29) — probe commands already removed in U17; added "Probing a new LM tool" section to DEVELOPMENT.md; updated README eval_js description with trust warning
 
-### ▶ NEXT: U14 (element selection push — gate required), U15 (multi-window — gate required)
+### Security token follow-up ✅ COMPLETE (2026-05-30)
+
+Token regression fixes after PR #26 landed:
+
+- Removed `.mcp.json` from repo and gitignored — static tokenless URL conflicted with per-machine token in `~/.claude.json`, breaking the dev's own Claude Code connection
+- Added `Integrated Browser MCP: Copy MCP URL` command — copies full URL with token to clipboard; only discoverable path for Cline/Continue.dev users
+- Updated README Getting Started sections (Claude Code / Cline / Continue.dev) — removed static tokenless URLs, replaced with auto-registration note + Copy MCP URL instructions
+- Added `[session] SSE GET opened/closed` log + `probeSend()` + `Probe SSE Push (U14 gate)` command — gate infrastructure for U14 (determines Path A push vs Path B pull)
+
+### ▶ NEXT: U14 gate → then U14 implementation, U15 (multi-window — gate required)
+
+Gate still required before any U14 code: run **Integrated Browser MCP: Probe SSE Push (U14 gate)** in a live Claude Code session and observe whether `[session] SSE GET opened` appears in the output channel.
 
 Lands after every Phase 4 and Phase 5 unit is merged.
 

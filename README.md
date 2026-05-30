@@ -103,37 +103,19 @@ Works with any agent that supports the MCP streamable HTTP transport running on 
 
 ### Claude Code
 
-**Project-scoped** — add `.mcp.json` to your project root:
-
-```json
-{
-  "mcpServers": {
-    "integratedBrowser": {
-      "type": "http",
-      "url": "http://localhost:3100/mcp"
-    }
-  }
-}
-```
-
-**User-scoped** — add to `~/.claude.json`:
-
-```json
-{
-  "mcpServers": {
-    "integratedBrowser": {
-      "type": "http",
-      "url": "http://localhost:3100/mcp"
-    }
-  }
-}
-```
+The extension auto-registers itself with Claude Code on first activation. No manual config needed — on startup it writes the correct URL (including session token) to `~/.claude.json` and prompts you to confirm.
 
 Run `claude` in your project — the `integratedBrowser` MCP server will be listed automatically.
 
+> [!TIP]
+> If you need the URL (e.g. after reinstalling), run **Integrated Browser MCP: Copy MCP URL** from the Command Palette to copy it to the clipboard.
+
 ### Cline
 
-Open Cline's MCP settings and add a **Remote Server** via the UI (choose *Streamable HTTP* from the transport dropdown), or edit the config file directly.
+The server requires a session token that is unique per machine. Get your URL from the Command Palette:
+
+1. Open **Integrated Browser MCP: Copy MCP URL** — the full URL (with token) is copied to your clipboard.
+2. Open Cline's MCP settings and add a **Remote Server** via the UI (choose *Streamable HTTP* from the transport dropdown), or edit the config file directly.
 
 Config file locations:
 
@@ -145,25 +127,29 @@ Config file locations:
   "mcpServers": {
     "integratedBrowser": {
       "type": "streamableHttp",
-      "url": "http://localhost:3100/mcp"
+      "url": "http://127.0.0.1:3100/mcp?token=<your-token>"
     }
   }
 }
 ```
+
+Replace `<your-token>` with the value from the **Copy MCP URL** command.
 
 > [!IMPORTANT]
 > The `"type": "streamableHttp"` field is required. Without it Cline silently falls back to the legacy SSE transport and the connection will fail.
 
 ### Continue.dev
 
-Add to `~/.continue/config.yaml`:
+Get your URL from the Command Palette (**Integrated Browser MCP: Copy MCP URL**), then add to `~/.continue/config.yaml`:
 
 ```yaml
 mcpServers:
   - name: integratedBrowser
     type: streamable-http
-    url: http://localhost:3100/mcp
+    url: http://127.0.0.1:3100/mcp?token=<your-token>
 ```
+
+Replace `<your-token>` with the value from the **Copy MCP URL** command.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -238,6 +224,7 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 | --- | --- |
 | `Integrated Browser MCP: Start Server` | Start the MCP server manually. Useful when `autoStart` is disabled. |
 | `Integrated Browser MCP: Stop Server` | Stop the running MCP server. |
+| `Integrated Browser MCP: Copy MCP URL` | Copy the full MCP server URL (including session token) to the clipboard. Use this to configure Cline, Continue.dev, or other MCP clients. |
 | `Integrated Browser MCP: Enable CDP (dialog-free browser tools)` | Writes `enable-proposed-api` to `argv.json` so all browser tools run without consent dialogs after a VS Code restart. |
 | `Integrated Browser MCP: List Available LM Tools (debug)` | Print all LM tools registered in VS Code to the *Browser MCP Debug* output channel. Helpful for verifying that the browser tools are active when troubleshooting. |
 

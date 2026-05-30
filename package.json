@@ -45,6 +45,14 @@
       {
         "command": "integratedBrowserMcp.enableCdp",
         "title": "Integrated Browser MCP: Enable CDP (dialog-free browser tools)"
+      },
+      {
+        "command": "integratedBrowserMcp.copyMcpUrl",
+        "title": "Integrated Browser MCP: Copy MCP URL"
+      },
+      {
+        "command": "integratedBrowserMcp.probeSsePush",
+        "title": "Integrated Browser MCP: Probe SSE Push (U14 gate)"
       }
     ],
     "configuration": {

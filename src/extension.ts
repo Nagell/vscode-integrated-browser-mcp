@@ -182,6 +182,42 @@ export async function activate(context: vscode.ExtensionContext) {
             ch.show();
         }),
 
+        vscode.commands.registerCommand('integratedBrowserMcp.copyMcpUrl', async () => {
+            const currentPort = server?.port;
+            if (currentPort === undefined) {
+                void vscode.window.showWarningMessage('MCP server is not running.');
+                return;
+            }
+            const url = token
+                ? `http://127.0.0.1:${currentPort}/mcp?token=${token}`
+                : `http://127.0.0.1:${currentPort}/mcp`;
+            await vscode.env.clipboard.writeText(url);
+            void vscode.window.showInformationMessage(`MCP URL copied: ${url}`);
+        }),
+
+        vscode.commands.registerCommand('integratedBrowserMcp.probeSsePush', async () => {
+            if (!server) { void vscode.window.showWarningMessage('Server not running'); return; }
+            const { sessionCount, results } = await server.probeSend();
+            const ch = getDebugChannel();
+            ch.appendLine(`=== SSE Push Gate (U14) ===`);
+            ch.appendLine(`Active sessions: ${sessionCount}`);
+            if (sessionCount === 0) {
+                ch.appendLine('No sessions — connect Claude Code first, then re-run this command.');
+                void vscode.window.showWarningMessage('No active MCP sessions. Connect Claude Code first.');
+                ch.show();
+                return;
+            }
+            for (const r of results) {
+                ch.appendLine(`Session ${r.sessionId}: ${r.ok ? 'SENT OK' : `FAILED — ${r.error}`}`);
+            }
+            ch.appendLine('Check Claude Code terminal output for a "notifications/message" log.');
+            ch.appendLine('If Claude Code logs it → SSE channel is open → Path A viable.');
+            ch.appendLine('If nothing appears → no persistent SSE → Path B (pull model) required.');
+            ch.show();
+            const okCount = results.filter(r => r.ok).length;
+            void vscode.window.showInformationMessage(`SSE probe: ${okCount}/${sessionCount} sends did not throw. Check "Browser MCP Debug" output channel.`);
+        }),
+
         vscode.commands.registerCommand('integratedBrowserMcp.enableCdp', async () => {
             const argvPaths = collectArgvJsonPaths();
             const extId = 'Nagell.vscode-integrated-browser-mcp';
