@@ -134,12 +134,14 @@ export class McpBridgeServer {
                     res.status(400).send('Invalid or missing session ID');
                     return;
                 }
+                this._output.appendLine(`[session] ${sessionId} SSE GET opened — client holds SSE channel`);
                 try {
                     await entry.transport.handleRequest(req, res);
                 } catch (err) {
                     this._output.appendLine(`[error] GET /mcp: ${err}`);
                     if (!res.headersSent) { res.status(500).send('Internal server error'); }
                 }
+                this._output.appendLine(`[session] ${sessionId} SSE GET closed`);
             });
 
             app.delete('/mcp', async (req, res) => {
@@ -172,6 +174,21 @@ export class McpBridgeServer {
                 resolve();
             });
         });
+    }
+
+    async probeSend(): Promise<{ sessionCount: number; results: Array<{ sessionId: string; ok: boolean; error?: string }> }> {
+        const results: Array<{ sessionId: string; ok: boolean; error?: string }> = [];
+        for (const [sid, { transport }] of this._sessions) {
+            try {
+                await transport.send({ jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', logger: 'gate-probe', data: 'SSE push gate probe — if you see this, Path A is viable' } });
+                results.push({ sessionId: sid, ok: true });
+                this._output.appendLine(`[gate] probeSend → session ${sid}: sent OK`);
+            } catch (err) {
+                results.push({ sessionId: sid, ok: false, error: String(err) });
+                this._output.appendLine(`[gate] probeSend → session ${sid}: FAILED — ${err}`);
+            }
+        }
+        return { sessionCount: this._sessions.size, results };
     }
 
     async stop(): Promise<void> {
