@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.6.0...vscode-integrated-browser-mcp-v0.6.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* **token:** remove .mcp.json, add Copy MCP URL command, fix README ([ff2bf63](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/ff2bf6374281ae9d2fef22c080481d717fe40ebe))
+* **token:** remove .mcp.json, add Copy MCP URL command, fix README ([b4d5eeb](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/b4d5eeb670494a70386ca99fec094a294eb4c991))
+
 ## [0.6.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.5.0...vscode-integrated-browser-mcp-v0.6.0) (2026-05-30)
 
 
