@@ -263,6 +263,8 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`).
 - [x] Auto-configure `~/.claude.json` on first activation
 - [x] One-click CDP setup via `Enable CDP` command
 - [x] Element selection — floating "Pick for Agent" button in every browser page; agent retrieves via `get_element_selection`
+- [ ] Reliable multi-tab support — stable CDP session tracking and element picker across multiple open tabs (in progress)
+- [ ] Multi-window support — per-window MCP server / port registry (deferred)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
