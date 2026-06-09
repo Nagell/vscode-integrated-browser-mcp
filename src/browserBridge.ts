@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { CdpManager, BrowserTab } from './cdp/cdpManager.js';
+import type { DebugLogger } from './util/logging.js';
 
 export type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 
@@ -19,26 +20,23 @@ const BROWSER_TOOLS = {
 
 let cdpManager: CdpManager | undefined;
 let cdpFallbackLogged = false;
-let output: vscode.OutputChannel | undefined;
+// No-op until wired in activate(). Gated behind `integratedBrowserMcp.extendedLogging`.
+let debug: DebugLogger = () => {};
 
 export function setCdpManager(manager: CdpManager): void {
     cdpManager = manager;
 }
 
-export function setOutput(channel: vscode.OutputChannel): void {
-    output = channel;
-}
-
-function log(msg: string): void {
-    output?.appendLine(msg);
+export function setDebugLogger(logger: DebugLogger): void {
+    debug = logger;
 }
 
 function logCdpFallback(err: unknown, op?: string): void {
     const context = op ? ` (${op})` : '';
-    log(`[cdp]${context} error: ${err instanceof Error ? err.message : String(err)} — falling back to invokeTool`);
+    debug(`[cdp]${context} error: ${err instanceof Error ? err.message : String(err)} — falling back to invokeTool`);
     if (!cdpFallbackLogged) {
         cdpFallbackLogged = true;
-        log('[cdp] Consent dialogs will appear on first tool use. Run "Integrated Browser MCP: Enable CDP" to disable them.');
+        debug('[cdp] Consent dialogs will appear on first tool use. Run "Integrated Browser MCP: Enable CDP" to disable them.');
     }
 }
 
@@ -64,6 +62,16 @@ function resultToMcp(result: vscode.LanguageModelToolResult): McpContent[] {
         }
     }
     return out;
+}
+
+// Serializes a tool result's content parts to a compact, log-safe string for diagnostics.
+function describeResult(result: vscode.LanguageModelToolResult): string {
+    const parts = result.content.map(part => {
+        if (part instanceof vscode.LanguageModelTextPart) { return `text:${JSON.stringify(part.value)}`; }
+        if (part instanceof vscode.LanguageModelDataPart) { return `data:${part.mimeType}(${part.data.byteLength}b)`; }
+        return 'unknown-part';
+    });
+    return parts.length > 0 ? parts.join(' | ') : '(empty result)';
 }
 
 function extractPageId(result: vscode.LanguageModelToolResult): string | undefined {
@@ -110,8 +118,10 @@ export async function openBrowserPage(url?: string, forceNew?: boolean): Promise
     });
     const pageId = extractPageId(result);
     if (!pageId) {
+        debug(`[open_browser_page] could not parse a Page ID — raw result: ${describeResult(result)}`);
         throw new Error('open_browser_page did not return a Page ID');
     }
+    debug(`[open_browser_page] parsed pageId=${pageId} — raw result: ${describeResult(result)}`);
     if (cdpManager && url) {
         const win = vscode.window as unknown as { browserTabs?: BrowserTab[] };
         const tabs = win.browserTabs;

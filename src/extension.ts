@@ -7,6 +7,7 @@ import * as bridge from './browserBridge.js';
 import { CdpManager } from './cdp/cdpManager.js';
 import { ensureClaudeMcpEntry } from './install/claudeConfig.js';
 import { collectArgvJsonPaths } from './util/platformPaths.js';
+import { createDebugLogger } from './util/logging.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
@@ -82,9 +83,10 @@ async function doEnableCdp(argvPaths: string[], out: vscode.OutputChannel): Prom
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
     server = new McpBridgeServer(output);
-    bridge.setOutput(output);
 
     const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+    const debug = createDebugLogger(output, isDev);
+    bridge.setDebugLogger(debug);
     const cfg = vscode.workspace.getConfiguration('integratedBrowserMcp');
     // cfg.get('port') resolves the schema default (3100) even when not explicitly set,
     // so use inspect() to distinguish user-configured values from the schema default.

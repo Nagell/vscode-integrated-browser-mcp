@@ -219,6 +219,7 @@ Replace `<your-token>` with the value from the **Copy MCP URL** command.
 | --- | --- | --- |
 | `integratedBrowserMcp.port` | `3100` | Port the MCP server listens on |
 | `integratedBrowserMcp.autoStart` | `true` | Start the server automatically on VS Code launch |
+| `integratedBrowserMcp.extendedLogging` | `false` | Emit verbose CDP/element-picker diagnostics to the output channel (always on in the Extension Development Host) |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

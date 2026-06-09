@@ -68,6 +68,11 @@
           "type": "boolean",
           "default": true,
           "description": "Start the MCP server automatically when VS Code opens"
+        },
+        "integratedBrowserMcp.extendedLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emit verbose diagnostic logging (CDP session and element-picker lifecycle, plus raw open_browser_page tool results) to the \"Integrated Browser MCP\" output channel. Useful when reporting issues. Always on in the Extension Development Host."
         }
       }
     }
