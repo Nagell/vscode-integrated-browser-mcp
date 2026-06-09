@@ -1722,140 +1722,67 @@ supersedes the probe's experimental code path)
 
 ---
 
-- U14. **Element selection — push picked element via SSE**
+- U14. **Element selection — floating page button + CDP pull model** ✅ COMPLETE (2026-05-30)
 
-**Goal:** When the user selects an element in the Integrated Browser, push the
-element's data (screenshot + accessible name + computed styles snapshot + position
-rect + innerText) to all active MCP sessions via the SSE channel so Claude Code
-receives it as automatic context. This was prior plan U8 (post-v1, planned), moved
-here for execution.
+*(Replanned twice. Original plan: intercept VS Code's "Add Element to Chat" via passive
+`Overlay.inspectNodeRequested` observation. Investigation result: VS Code uses its own
+internal CDP session — events from its picker do NOT arrive on our session. Final
+approach: inject our own "⬡ Pick for Agent" floating button into the page via
+`Runtime.evaluate`, activate the CDP Overlay inspector from our own session via
+`Overlay.setInspectMode`, and capture the resulting `Overlay.inspectNodeRequested`
+event which DOES fire because WE activated the inspector.)*
+
+**What was built:**
+
+- `src/elementCapture.ts` — singleton `CapturedElement` state (`getCaptured`, `setCaptured`)
+- `src/cdp/cdpSession.ts` — added `onEvent(method, listener)` API; `onMessage` now dispatches
+  CDP events (messages without `id`) to registered listeners instead of silently dropping them
+- `src/cdp/captureElement.ts` — `captureNodeByBackendId`: pulls tag, outerHTML, bounding rect,
+  and innerText via `DOM.describeNode` → `DOM.getOuterHTML` → `DOM.getBoxModel` → `DOM.resolveNode`
+  → `Runtime.callFunctionOn`; calls `setCaptured()`
+- `src/cdp/cdpManager.ts` — on each new CDP session: enables `DOM`, `Overlay`, `Page`,
+  `Runtime.addBinding('__mcpPick')`; injects floating button via `Runtime.evaluate`;
+  re-injects on `Page.loadEventFired`; `Runtime.bindingCalled` → `Overlay.setInspectMode`;
+  `Overlay.inspectNodeRequested` → `captureNodeByBackendId` + deactivate picker
+- `src/extension.ts` — `integratedBrowserMcp.pickElement` command (Command Palette fallback);
+  `onCapture` callback shows VS Code notification; `package.json` toolbar button via
+  `contributes.menus.editor/title` (appears when `activeWebviewPanelId == 'simpleBrowser.view'`)
+- `src/tools/content.ts` — `get_element_selection`, `clear_element_selection` MCP tools
+- `src/install/claudeConfig.ts` — `claudeConfig.offered` key per-serverName fix (dev/prod isolation)
+
+**UX flow:**
+
+1. Agent calls `open_browser_page` → CDP session established → floating "⬡ Pick for Agent"
+   button appears in the bottom-right corner of the page
+2. User clicks the button → VS Code's node inspector activates (blue highlight on hover)
+3. User clicks any element → picker deactivates → VS Code notification confirms capture
+4. Agent calls `get_element_selection` → returns `{ tagName, innerText, outerHTML, rect, capturedAt }`
+
+**Known limitation — multi-tab navigation:**
+
+VS Code's Integrated Browser navigates a single webview by default (`forceNew: false`).
+When the agent opens a second URL without `forceNew: true`, VS Code navigates the existing
+tab rather than opening a new one. Both the old and new pageId exist in our registry but
+only one physical browser tab is visible. `CdpManager` detects same-tab reuse via object
+reference equality and migrates the session; a `pendingSessions` map prevents concurrent
+session creation races. Multi-tab with distinct visible windows requires `forceNew: true`.
 
 **Requirements:** R13
-
-**Dependencies:** U2 (clean home for handler code); independent of all tool units
-
-**Files:**
-
-- Create: `src/install/elementSelector.ts` — picker invocation + payload assembly
-  - SSE broadcast to subscribed sessions.
-- Modify: `src/mcpServer.ts` — expose a `broadcastToSubscribers(notification)`
-  method on `McpBridgeServer` that iterates a `Set<sessionId>` subscriber set
-  and calls `transport.send(notification)` for each. `SessionEntry` gains a
-  `subscriptions: { elementSelection: boolean }` field (default `false`).
-- Modify: `src/tools/diagnostic.ts` (or a new `src/tools/subscribe.ts`) —
-  register `subscribe_element_selection` and `unsubscribe_element_selection`
-  tools that flip the current session's flag.
-- Modify: `src/extension.ts` — register the picker command; instantiate
-  `elementSelector` and wire it to the broadcast method.
-- Modify: `package.json` — add `contributes.commands` entry for the picker
-  command and (if Path A is viable) `contributes.menus.editor/title` entry with
-  a `when` clause scoped to the Integrated Browser's `viewType`.
-
-**Approach:**
-
-- **Gate first.** Run `vscode.commands.getCommands(true)` once during U14 work
-  and grep for `browser.*pick*`, `browser.*inspect*`, `editor.action.inspectTM*`,
-  and anything else that looks like an element picker. Document the findings in
-  `docs/DEVELOPMENT.md`.
-  - **Path A (button or event interception):** if a picker command exists,
-    contribute a toolbar button on the browser viewType and invoke the command;
-    capture the result; assemble the payload and broadcast it. Also probe
-    `vscode.lm.onDidReceiveTool*` (or similar) to see if VS Code fires an event
-    when its own picker tool is invoked — if so, observe and re-emit without
-    needing a button.
-  - **Path B fallback (downgraded scope):** if no picker exists, ship a smaller
-    command — `Integrated Browser MCP: Send current screenshot to agent` — that
-    captures `screenshot_page` of the active browser tab and pushes it. Do *not*
-    implement a full hover-highlight + click-capture system in JS; that's
-    significant scope outside the bounds of this plan.
-- **Broadcast plumbing:** a notification is a JSON-RPC message with no `id` and
-  a `method` like `"notifications/elements/selected"`. Body shape:
-
-  ```
-  {
-    "method": "notifications/elements/selected",
-    "params": {
-      "pageId": "<uuid-if-known>",
-      "screenshot": { "data": "<base64>", "mimeType": "image/jpeg" },
-      "accessibleName": "...",
-      "innerText": "...",
-      "rect": { "x": 0, "y": 0, "width": 0, "height": 0 },
-      "computedStyles": { "color": "...", "font-size": "..." }
-    }
-  }
-  ```
-
-- **Path A interop prerequisite (gate experiment, ~30 minutes, do this before
-  designing the picker UX):** the broadcast assumes `transport.send()` actually
-  reaches a connected Claude Code session. `StreamableHTTPServerTransport`'s
-  server-initiated messages require the client to hold a `GET /mcp` SSE stream
-  open. Start a real Claude Code session, fire a no-op `transport.send()`, and
-  confirm receipt. If Claude Code does not keep the GET channel open, U14 must
-  pivot to a polling/pull pattern (a new MCP tool the agent calls to fetch
-  the latest selection) — at which point U14 is a different feature and needs
-  re-planning.
-- **No active session:** if `McpBridgeServer.sessionCount === 0` when the button
-  fires, show a VS Code info notification with text `"No Claude Code session
-  connected — start Claude Code in a terminal to connect"` plus an `Open setup
-  docs` button that opens `docs/DEVELOPMENT.md` in the editor.
-- **Subscribe model (resolved 2026-05-18):** picker pushes use **explicit
-  subscription**. Agents must call `subscribe_element_selection` once per
-  session to start receiving notifications. This eliminates cross-session
-  leakage by default and makes the receiving set explicit at the protocol
-  level. Two additional MCP tools register alongside the picker:
-  - `subscribe_element_selection` — `{ }` → marks the current session as a
-    subscriber. Idempotent. Returns `{ subscribed: true }`.
-  - `unsubscribe_element_selection` — `{ }` → removes subscription. Returns
-    `{ subscribed: false }`.
-- **No-subscriber feedback (failsafe):** when the user clicks the picker
-  button and `subscribers.size === 0`, show a VS Code information notification
-  with exact text: *"Picked element ready but no agent is subscribed to
-  receive it. The connected agent must call `subscribe_element_selection`
-  once per session — see README for setup."* Include an `Open setup docs`
-  button that opens `docs/DEVELOPMENT.md` at the relevant section. This is
-  the explicit nudge to surface the missing wiring rather than failing
-  silently. Log the same message to the output channel.
-- **Threat model:** localhost-only, single-developer machine. Subscribers are
-  the explicit consent boundary — only agents the user has wired up via their
-  MCP setup can subscribe. Element-selection data is gated on both user
-  intent (clicking the picker button) and agent intent (calling subscribe).
-- **Toolbar button visuals** (Path A): contribute via
-  `contributes.menus.editor/title` with icon `$(codicon-inspect)`, tooltip
-  `"Send selected element to Claude Code"`, aria-label same as tooltip. Path B
-  fallback uses icon `$(codicon-device-camera)` with tooltip `"Send screenshot
-  to Claude Code"` to make the downgraded capability visually distinct from a
-  true picker.
-
-**Execution note:** Investigation-led — the gate decides whether Path A or Path
-B ships. Capture the gate outcome in `docs/DEVELOPMENT.md` regardless of which
-path lands.
-
-**Patterns to follow:**
-
-- Prior plan U8 design notes in
-  [docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md](docs/plans/2026-05-15-001-feat-integrated-browser-mcp-plan.md)
-  (lines ~741-797).
-- `StreamableHTTPServerTransport`'s server-initiated message support (the
-  `GET /mcp` SSE channel is already wired up — confirmed by prior U2).
-
-**Test scenarios:**
-
-- Happy path (manual, Path A): with a Claude Code session active, click an
-  element in the browser → Claude Code receives a notification with the element
-  data.
-- Edge case: no active session → VS Code info notification shown; no broadcast.
-- Edge case: two simultaneous sessions → both receive the notification.
-- Gate failure: picker command not found → Path B ships; the new command is
-  registered and the broadcast plumbing still works.
-
-**Verification:**
-
-- Manual: click → Claude Code session log shows the inbound notification with
-  the expected payload shape.
 
 ---
 
 - U15. **Multi-window support**
+
+**Note from U14 (2026-05-30):** During U14 testing a related issue surfaced — when
+`open_browser_page` is called without `forceNew: true`, VS Code navigates the existing
+Integrated Browser tab rather than opening a new one. Both the old and new pageIds end
+up in the session registry while only one physical tab is visible. `CdpManager` has a
+partial fix (tab object reference equality check + `pendingSessions` race guard), but
+this may not cover all cases if VS Code creates fresh tab object references per call.
+This behaviour needs empirical investigation before U15 ships: confirm whether VS Code
+actually reuses tab references, whether the `tabToPageId` migration fires, and whether
+there are edge cases (rapid successive opens, same URL twice, etc.) not yet covered.
+Document findings in `docs/DEVELOPMENT.md`.
 
 **Goal:** Allow the extension to run in multiple VS Code windows simultaneously
 without port conflicts. Each window's MCP server is reachable on its own port;
@@ -2115,7 +2042,7 @@ when the tool units land.
 
 - ~~U17 gate~~ — passed (2026-05-27) via VS Code proposed `browser` API
 - U17 ✅ COMPLETE (2026-05-28)
-- U14 (element selection push) — **gate still required** before implementation (see U14 unit)
+- ~~U14 gate~~ — **passed (2026-05-30)** — `[session] SSE GET opened` confirmed; Claude Code holds SSE channel open; Path A (push/SSE) is viable (see U14 unit)
 - U15 (multi-window support) — depends on U2, U5
 
 ### ~~Phase 6 — Cleanup~~ ✅ COMPLETE (2026-05-29)
@@ -2131,11 +2058,13 @@ Token regression fixes after PR #26 landed:
 - Updated README Getting Started sections (Claude Code / Cline / Continue.dev) — removed static tokenless URLs, replaced with auto-registration note + Copy MCP URL instructions
 - Added `[session] SSE GET opened/closed` log + `probeSend()` + `Probe SSE Push (U14 gate)` command — gate infrastructure for U14 (determines Path A push vs Path B pull)
 
-### ▶ NEXT: U14 gate → then U14 implementation, U15 (multi-window — gate required)
+### Dev-mode registration fix ✅ COMPLETE (2026-05-30)
 
-Gate still required before any U14 code: run **Integrated Browser MCP: Probe SSE Push (U14 gate)** in a live Claude Code session and observe whether `[session] SSE GET opened` appears in the output channel.
+Fixed `claudeConfig.ts`: `claudeConfig.offered` globalState key was shared between production (`integratedBrowser`) and dev (`integratedBrowser-dev`) extension instances. Dev extension never registered its port-3101 entry because the production extension had already set the flag. Fixed by keying the flag per `serverName`: `claudeConfig.offered.${serverName}`.
 
-Lands after every Phase 4 and Phase 5 unit is merged.
+### ▶ NEXT: U15 (multi-window support)
+
+U14 complete (2026-05-30). See U14 unit above for what was built and the multi-tab known limitation. U15 should also address the multi-tab navigation issue discovered during U14 testing — see note in U15 unit below.
 
 ---
 

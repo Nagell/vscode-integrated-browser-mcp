@@ -7,9 +7,11 @@ import * as bridge from './browserBridge.js';
 import { CdpManager } from './cdp/cdpManager.js';
 import { ensureClaudeMcpEntry } from './install/claudeConfig.js';
 import { collectArgvJsonPaths } from './util/platformPaths.js';
+import { createDebugLogger } from './util/logging.js';
 
 let server: McpBridgeServer | undefined;
 let output: vscode.OutputChannel | undefined;
+let cdpManager: CdpManager | undefined;
 
 // Dev-only: verifies the invokeTool fallback response shape hasn't changed.
 // Only runs in Extension Development Host. At activation time there is usually no open
@@ -81,9 +83,10 @@ async function doEnableCdp(argvPaths: string[], out: vscode.OutputChannel): Prom
 export async function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Integrated Browser MCP');
     server = new McpBridgeServer(output);
-    bridge.setOutput(output);
 
     const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+    const debug = createDebugLogger(output, isDev);
+    bridge.setDebugLogger(debug);
     const cfg = vscode.workspace.getConfiguration('integratedBrowserMcp');
     // cfg.get('port') resolves the schema default (3100) even when not explicitly set,
     // so use inspect() to distinguish user-configured values from the schema default.
@@ -96,9 +99,14 @@ export async function activate(context: vscode.ExtensionContext) {
     // Wire CDP if VS Code proposed browser API is available
     const win = vscode.window as unknown as Record<string, unknown>;
     if (typeof win['browserTabs'] !== 'undefined') {
-        const manager = new CdpManager(output);
-        bridge.setCdpManager(manager);
-        context.subscriptions.push({ dispose: () => manager.dispose() });
+        cdpManager = new CdpManager(output);
+        cdpManager.setOnCapture((tagName, preview) => {
+            void vscode.window.showInformationMessage(
+                `Element captured: <${tagName}>${preview}. Call get_element_selection in Claude Code.`
+            );
+        });
+        bridge.setCdpManager(cdpManager);
+        context.subscriptions.push({ dispose: () => cdpManager?.dispose() });
         const onOpen = win['onDidOpenBrowserTab'] as ((listener: () => void) => vscode.Disposable) | undefined;
         if (onOpen) {
             context.subscriptions.push(
@@ -195,27 +203,37 @@ export async function activate(context: vscode.ExtensionContext) {
             void vscode.window.showInformationMessage(`MCP URL copied: ${url}`);
         }),
 
-        vscode.commands.registerCommand('integratedBrowserMcp.probeSsePush', async () => {
-            if (!server) { void vscode.window.showWarningMessage('Server not running'); return; }
-            const { sessionCount, results } = await server.probeSend();
-            const ch = getDebugChannel();
-            ch.appendLine(`=== SSE Push Gate (U14) ===`);
-            ch.appendLine(`Active sessions: ${sessionCount}`);
-            if (sessionCount === 0) {
-                ch.appendLine('No sessions — connect Claude Code first, then re-run this command.');
-                void vscode.window.showWarningMessage('No active MCP sessions. Connect Claude Code first.');
-                ch.show();
+        vscode.commands.registerCommand('integratedBrowserMcp.pickElement', async () => {
+            if (!cdpManager) {
+                void vscode.window.showWarningMessage(
+                    'Element picker requires CDP. Run "Enable CDP" from the Command Palette and restart VS Code.'
+                );
                 return;
             }
-            for (const r of results) {
-                ch.appendLine(`Session ${r.sessionId}: ${r.ok ? 'SENT OK' : `FAILED — ${r.error}`}`);
+            const pageIds = cdpManager.trackedPageIds;
+            if (pageIds.length === 0) {
+                void vscode.window.showWarningMessage(
+                    'No browser pages open. Open a page first (e.g. ask Claude Code to use open_browser_page).'
+                );
+                return;
             }
-            ch.appendLine('Check Claude Code terminal output for a "notifications/message" log.');
-            ch.appendLine('If Claude Code logs it → SSE channel is open → Path A viable.');
-            ch.appendLine('If nothing appears → no persistent SSE → Path B (pull model) required.');
-            ch.show();
-            const okCount = results.filter(r => r.ok).length;
-            void vscode.window.showInformationMessage(`SSE probe: ${okCount}/${sessionCount} sends did not throw. Check "Browser MCP Debug" output channel.`);
+            const pageId = pageIds[pageIds.length - 1];
+            try {
+                const session = await cdpManager.ensureSession(pageId);
+                await session.send('Overlay.setInspectMode', {
+                    mode: 'searchForNode',
+                    highlightConfig: {
+                        showInfo: true,
+                        contentColor: { r: 0, g: 120, b: 255, a: 0.15 },
+                        borderColor: { r: 0, g: 120, b: 255, a: 0.8 },
+                    },
+                });
+                output?.appendLine(`[cdp] element picker activated for pageId=${pageId}`);
+                void vscode.window.showInformationMessage('Click an element in the browser to capture it.');
+            } catch (err) {
+                output?.appendLine(`[cdp] pickElement error: ${err}`);
+                void vscode.window.showErrorMessage(`Could not activate element picker: ${err}`);
+            }
         }),
 
         vscode.commands.registerCommand('integratedBrowserMcp.enableCdp', async () => {

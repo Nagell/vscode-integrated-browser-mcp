@@ -176,21 +176,6 @@ export class McpBridgeServer {
         });
     }
 
-    async probeSend(): Promise<{ sessionCount: number; results: Array<{ sessionId: string; ok: boolean; error?: string }> }> {
-        const results: Array<{ sessionId: string; ok: boolean; error?: string }> = [];
-        for (const [sid, { transport }] of this._sessions) {
-            try {
-                await transport.send({ jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', logger: 'gate-probe', data: 'SSE push gate probe — if you see this, Path A is viable' } });
-                results.push({ sessionId: sid, ok: true });
-                this._output.appendLine(`[gate] probeSend → session ${sid}: sent OK`);
-            } catch (err) {
-                results.push({ sessionId: sid, ok: false, error: String(err) });
-                this._output.appendLine(`[gate] probeSend → session ${sid}: FAILED — ${err}`);
-            }
-        }
-        return { sessionCount: this._sessions.size, results };
-    }
-
     async stop(): Promise<void> {
         for (const [sid, { transport }] of this._sessions) {
             try { await transport.close(); } catch (err) { this._output.appendLine(`[stop] failed to close session ${sid}: ${err}`); }

@@ -1,0 +1,10 @@
+{
+  // Minimal dev container to reproduce issue #30 (open_browser_page returns no Page ID
+  // in dev containers). Scaffolding only — not part of the shipped extension.
+  "name": "ibmcp-repro-30",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  // 8080: test page served inside the container (mimics the reporter's http://localhost/... page)
+  // 3101: the extension's dev-mode MCP server (integratedBrowser-dev)
+  "forwardPorts": [8080, 3101],
+  "postCreateCommand": "sudo corepack enable && pnpm install && pnpm run compile"
+}

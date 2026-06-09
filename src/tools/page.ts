@@ -23,6 +23,7 @@ export function registerPageTools(server: McpServer, ctx: ToolContext): void {
         try {
             const { pageId, content } = await bridge.openBrowserPage(url, forceNew);
             pages.set(pageId, { url, openedAt: new Date() });
+            output.appendLine(`[open_browser_page] opened pageId=${pageId}`);
             bridge.injectConsoleCapture(pageId).catch(err => {
                 output.appendLine(`[open_browser_page] console inject failed: ${err}`);
             });
