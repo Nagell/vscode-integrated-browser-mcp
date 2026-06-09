@@ -1,17 +1,36 @@
+# Controls what ships in the published .vsix. Only the esbuild bundle (out/extension.js)
+# plus package.json / README / LICENSE are needed at runtime — everything below is excluded.
+
+# Editor / IDE config
 .vscode/**
-.vscode-test/**
-.github/**
-src/**
-docs/**
-out/test/**
 *.code-workspace
-.gitignore
 vsc-extension-quickstart.md
+
+# CI & repo meta
+.github/**
+.gitignore
+
+# Dev-container reproduction harness (committed, but not part of the extension)
+.devcontainer/**
+
+# Source & build tooling (only the bundled output is shipped)
+src/**
+**/*.ts
+**/*.map
 **/tsconfig.json
 **/eslint.config.mjs
 esbuild.mjs
-**/*.map
-**/*.ts
+
+# Docs
+docs/**
+
+# Tests
+out/test/**
+.vscode-test/**
 **/.vscode-test.*
+
+# Dependencies (bundled into out/ by esbuild; published with --no-dependencies)
 node_modules/**
+
+# Local MCP config (per-machine)
 .mcp.json

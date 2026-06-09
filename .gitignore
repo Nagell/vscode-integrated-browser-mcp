@@ -1,7 +1,17 @@
+# Dependencies
+node_modules
+
+# Build output
 out
 dist
-node_modules
-.vscode-test/
 *.vsix
+
+# Tooling caches
+.pnpm-store
+
+# Tests
+.vscode-test/
+
+# Local, per-machine config (not shared)
 .claude/
 .mcp.json
