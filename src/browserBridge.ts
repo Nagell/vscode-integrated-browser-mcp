@@ -118,7 +118,9 @@ export async function openBrowserPage(url?: string, forceNew?: boolean): Promise
     });
     const pageId = extractPageId(result);
     if (!pageId) {
-        debug(`[open_browser_page] could not parse a Page ID — raw result: ${describeResult(result)}`);
+        const win = vscode.window as unknown as { browserTabs?: BrowserTab[] };
+        debug(`[open_browser_page] could not parse a Page ID — raw result: ${describeResult(result)} ` +
+            `| remote=${vscode.env.remoteName ?? 'local'} vscode=${vscode.version} browserTabs=${win.browserTabs?.length ?? 'n/a'}`);
         throw new Error('open_browser_page did not return a Page ID');
     }
     debug(`[open_browser_page] parsed pageId=${pageId} — raw result: ${describeResult(result)}`);
