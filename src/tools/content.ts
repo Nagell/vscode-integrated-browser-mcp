@@ -64,8 +64,9 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
     });
 
     server.registerTool('get_element_selection', {
-        description: 'Return the element most recently selected via VS Code\'s built-in ' +
-            '"Add Element to Chat" button (Ctrl+Shift+C) in the Integrated Browser toolbar. ' +
+        description: 'Return the element most recently picked via the "⬡ Pick for Agent" button ' +
+            'that the Integrated Browser injects into the page (bottom-right corner). ' +
+            'Click that button, then click an element on the page to capture it. ' +
             'Returns the element\'s tag, text, HTML, and bounding rect. ' +
             'Returns an informational message when no element has been selected yet.',
         inputSchema: {}
@@ -74,8 +75,8 @@ export function registerContentTools(server: McpServer, ctx: ToolContext): void 
         const el = getCaptured();
         if (!el) {
             return { content: [{ type: 'text', text: 'No element selected. ' +
-                'Use the "Add Element to Chat" button (Ctrl+Shift+C) in the ' +
-                'Integrated Browser toolbar to pick an element, then call this tool.' }] as McpContent[] };
+                'Click the "⬡ Pick for Agent" button in the bottom-right of the page, ' +
+                'then click an element to capture it, then call this tool.' }] as McpContent[] };
         }
         return { content: [{ type: 'text', text: JSON.stringify(el, null, 2) }] as McpContent[] };
     });
