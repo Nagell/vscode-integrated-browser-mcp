@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.6.1...vscode-integrated-browser-mcp-v0.7.0) (2026-06-09)
+
+
+### Features
+
+* add extendedLogging setting and open_browser_page diagnostics ([096451c](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/096451c11bee1b586e9f4688a7d9378c5c14c952)), closes [#30](https://github.com/Nagell/vscode-integrated-browser-mcp/issues/30)
+* extendedLogging + open_browser_page diagnostics ([ed9c250](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/ed9c250525794b3035a39aeb58b33127ff928a17))
+* log tab state + environment on open_browser_page failure ([0ed252a](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/0ed252a78f3375b99b142801e50ce17d7e03e74d))
+* **U14:** element selection via CDP picker button ([b4a33da](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/b4a33daecc6313964ce9976cb8d511cc866382a2))
+
+
+### Bug Fixes
+
+* point get_element_selection docs at the picker button ([99f10e6](https://github.com/Nagell/vscode-integrated-browser-mcp/commit/99f10e67462b78c3cf61b44126d3ff59f6587ccb))
+
 ## [0.6.1](https://github.com/Nagell/vscode-integrated-browser-mcp/compare/vscode-integrated-browser-mcp-v0.6.0...vscode-integrated-browser-mcp-v0.6.1) (2026-05-30)
 
 
